@@ -168,6 +168,7 @@
   <div class="dates">
     <label>Emitidas de <input type="date" id="dfrom"></label>
     <label>até <input type="date" id="dto"></label>
+    <label>Empresa <select id="femp"><option value="">Todas</option></select></label>
     <label>Local <select id="floc"><option value="">Todos</option><option value="CD">CD</option><option value="LOJA">LOJA</option><option value="MTD RIO">MTD RIO</option><option value="__none">Sem local</option></select></label>
     <button id="hoje">Hoje</button>
     <button id="semana">Últimos 7 dias</button>
@@ -408,18 +409,34 @@
     var cfg = await sb.from("config").select("valor").eq("chave", "cores").maybeSingle();
     if (!cfg.error && cfg.data && Array.isArray(cfg.data.valor) && cfg.data.valor.length) colorList = cfg.data.valor;
     $("colorlist").value = colorList.join("\n");
+    carregarEmpresas();
     buscar();
+  }
+
+  // ---------- lista de empresas (filtro) ----------
+  async function carregarEmpresas() {
+    var r = await sb.rpc("listar_empresas");
+    if (r.error || !Array.isArray(r.data)) return;
+    var sel = $("femp"), atual = sel.value;
+    var h = '<option value="">Todas</option>';
+    r.data.forEach(function (e) {
+      h += '<option value="' + esc(e.chave) + '">' + esc(e.nome || e.chave) + (e.cnpj ? " (" + esc(fmtCnpj(e.cnpj)) + ")" : "") + "</option>";
+    });
+    sel.innerHTML = h;
+    sel.value = atual;
+    if (sel.value !== atual) sel.value = "";
   }
 
   // ---------- pesquisa ----------
   function queryTerms() { return tokens($("q").value).split(" ").filter(Boolean); }
-  function filtrosAtivos() { return queryTerms().length > 0 || $("dfrom").value || $("dto").value || $("floc").value; }
+  function filtrosAtivos() { return queryTerms().length > 0 || $("dfrom").value || $("dto").value || $("floc").value || $("femp").value; }
   function params(offset, limite) {
     return {
       termos: queryTerms(),
       data_de: $("dfrom").value || null,
       data_ate: $("dto").value || null,
       local_filtro: $("floc").value || null,
+      empresa_filtro: $("femp").value || null,
       limite: limite,
       deslocamento: offset
     };
@@ -514,12 +531,12 @@
   // ---------- filtros ----------
   function agendarBusca() { clearTimeout(timer); timer = setTimeout(buscar, 250); }
   $("q").addEventListener("input", agendarBusca);
-  ["dfrom", "dto", "floc"].forEach(function (id) { $(id).addEventListener("change", buscar); });
+  ["dfrom", "dto", "floc", "femp"].forEach(function (id) { $(id).addEventListener("change", buscar); });
   function setRange(a, b) { $("dfrom").value = a; $("dto").value = b; buscar(); }
   $("hoje").addEventListener("click", function () { var t = isoDate(new Date()); setRange(t, t); });
   $("semana").addEventListener("click", function () { var d = new Date(); d.setDate(d.getDate() - 6); setRange(isoDate(d), isoDate(new Date())); });
   $("mes").addEventListener("click", function () { var n = new Date(); setRange(isoDate(new Date(n.getFullYear(), n.getMonth(), 1)), isoDate(new Date(n.getFullYear(), n.getMonth() + 1, 0))); });
-  $("limpaData").addEventListener("click", function () { $("q").value = ""; $("floc").value = ""; setRange("", ""); });
+  $("limpaData").addEventListener("click", function () { $("q").value = ""; $("floc").value = ""; $("femp").value = ""; setRange("", ""); });
 
   $("status").addEventListener("click", function (e) { if (e.target && e.target.id === "export") exportarCsv(); });
 
@@ -547,6 +564,7 @@
       view.notas = view.notas.filter(function (n) { return n.id !== del; });
       view.total = Math.max(0, view.total - 1);
       view.cadastradas = Math.max(0, view.cadastradas - 1);
+      carregarEmpresas();
       render();
     }
   });
@@ -630,6 +648,7 @@
     }
     if (notas.length) resumoEnvio(await enviarLotes(notas, "Salvando notas"));
     busy = false;
+    carregarEmpresas();
     buscar();
   }
   $("file").addEventListener("change", function () { handleFiles($("file").files); $("file").value = ""; });
@@ -747,6 +766,7 @@
       else resumoEnvio(await enviarLotes(lista, "Restaurando notas"));
     } catch (err) { say("err", "Não consegui ler o arquivo de cópia de segurança."); }
     busy = false;
+    carregarEmpresas();
     buscar();
   });
 
