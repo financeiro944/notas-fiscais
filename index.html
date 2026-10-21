@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Consulta de notas fiscais</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #F2F4F6; --surface: #FFFFFF; --ink: #18212B; --muted: #5B6773; --line: #D5DBE1; --group: #E7EDF1;
+    --accent: #0E6B6B; --accent-ink: #FFFFFF; --mark: #FFE08A; --mark-ink: #18212B;
+    --warn-bg: #FFF1D6; --warn-ink: #7A4B00; --err-bg: #FDE6E3; --err-ink: #8A1F14; --ok-bg: #DDF1EC; --ok-ink: #0B4F46;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #12181D; --surface: #1A222A; --ink: #E6EBEF; --muted: #9AA7B3; --line: #2C3843; --group: #222C35;
+      --accent: #4FB3B0; --accent-ink: #0B1416; --mark: #6B5A1E; --mark-ink: #FFF3CC;
+      --warn-bg: #3A2D10; --warn-ink: #F2C879; --err-bg: #3C1B17; --err-ink: #F5B1A8; --ok-bg: #12332E; --ok-ink: #9ADBCF;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #12181D; --surface: #1A222A; --ink: #E6EBEF; --muted: #9AA7B3; --line: #2C3843; --group: #222C35;
+    --accent: #4FB3B0; --accent-ink: #0B1416; --mark: #6B5A1E; --mark-ink: #FFF3CC;
+    --warn-bg: #3A2D10; --warn-ink: #F2C879; --err-bg: #3C1B17; --err-ink: #F5B1A8; --ok-bg: #12332E; --ok-ink: #9ADBCF;
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  *, *::before, *::after { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px; line-height: 1.5;
+  }
+  main { max-width: 1080px; margin: 0 auto; padding: 28px 20px 56px; }
+  h1 { font-size: 24px; line-height: 1.2; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .topbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 16px; }
+  .topbar .who { color: var(--muted); font-size: 13px; }
+  .spacer { flex: 1; }
+
+  /* login */
+  .login { max-width: 380px; margin: 12vh auto 0; padding: 0 20px; }
+  .login h1 { margin-bottom: 6px; }
+  .login p { color: var(--muted); margin: 0 0 20px; }
+  .login form { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 20px; display: grid; gap: 14px; }
+  .login label { display: grid; gap: 4px; font-size: 14px; font-weight: 500; }
+  .login input {
+    font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--bg); color: var(--ink);
+  }
+  .login button { padding: 11px 14px; font-size: 15px; }
+
+  .search { position: relative; }
+  .search svg { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; color: var(--muted); pointer-events: none; }
+  .search input {
+    width: 100%; font: inherit; font-size: 18px; padding: 16px 16px 16px 50px;
+    background: var(--surface); color: var(--ink); border: 1.5px solid var(--line); border-radius: 8px;
+  }
+  .search input::placeholder { color: var(--muted); }
+  .search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .search-help { margin: 8px 2px 0; color: var(--muted); font-size: 13px; }
+  .dates { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 12px; font-size: 14px; color: var(--muted); }
+  .dates label { display: flex; align-items: center; gap: 6px; }
+  .dates input[type="date"], select {
+    font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink);
+  }
+  select.loc { min-width: 120px; padding: 4px 6px; }
+  select.locall { font-size: 13px; }
+
+  .status { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 18px 0 14px; color: var(--muted); font-size: 14px; }
+  .status strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  button {
+    font: inherit; font-weight: 500; font-size: 14px; cursor: pointer; border-radius: 4px; padding: 7px 13px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button.danger { color: var(--err-ink); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  #messages { display: grid; gap: 8px; margin-bottom: 14px; }
+  .msg { padding: 9px 12px; border-radius: 4px; font-size: 14px; }
+  .msg.err { background: var(--err-bg); color: var(--err-ink); }
+  .msg.warn { background: var(--warn-bg); color: var(--warn-ink); }
+  .msg.ok { background: var(--ok-bg); color: var(--ok-ink); }
+
+  details.panel { margin-bottom: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+  details.panel > summary { cursor: pointer; padding: 11px 14px; font-weight: 500; }
+  details.panel .inner { padding: 4px 14px 16px; color: var(--muted); font-size: 14px; }
+  details.panel p { margin: 0 0 10px; max-width: 70ch; }
+  .drop {
+    display: block; border: 1.5px dashed var(--line); border-radius: 6px; padding: 22px 16px;
+    text-align: center; cursor: pointer; background: var(--bg); color: var(--ink);
+  }
+  .drop:hover, .drop.over, .drop:focus-within { border-color: var(--accent); }
+  .drop strong { display: block; font-weight: 600; }
+  .drop span { color: var(--muted); font-size: 14px; }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  textarea { width: 100%; min-height: 84px; font: inherit; font-size: 13px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+
+  .nota { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; overflow: hidden; }
+  .nota-head { background: var(--group); padding: 11px 14px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+  .nota-head h2 { margin: 0; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .nota-head .meta { color: var(--muted); font-size: 13px; }
+  .nota-head .tot { font-size: 13px; font-weight: 500; }
+  .nota-head .dest { font-size: 14px; }
+  .scroller { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 640px; }
+  thead th { text-align: left; font-weight: 500; font-size: 13px; color: var(--muted); padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody td { padding: 8px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.desc { max-width: 46ch; }
+  mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; padding: 0 1px; }
+  input.cor { font: inherit; width: 100%; min-width: 120px; padding: 4px 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--ink); }
+  input.cor:hover { border-color: var(--line); }
+  input.cor.vazia { background: var(--warn-bg); color: var(--warn-ink); }
+  input.cor.vazia::placeholder { color: var(--warn-ink); opacity: 0.8; }
+  .vazio-cor { color: var(--muted); }
+  .empty { padding: 40px 20px; text-align: center; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+  .more { display: block; margin: 8px auto 0; }
+  .note-hint { color: var(--muted); font-size: 13px; margin-top: 18px; max-width: 70ch; }
+</style>
+</head>
+<body>
+
+<!-- Aviso quando as chaves do Supabase ainda não foram coladas -->
+<section class="login" id="setup" hidden>
+  <h1>Falta configurar</h1>
+  <p>Abra o arquivo index.html num editor de texto e cole, no começo do script, o endereço (URL) e a chave pública do seu projeto Supabase. O passo a passo está no arquivo LEIA-ME.</p>
+</section>
+
+<!-- Tela de login -->
+<section class="login" id="login" hidden>
+  <h1>Consulta de notas fiscais</h1>
+  <p>Entre com o e-mail e a senha que você recebeu.</p>
+  <form id="loginForm">
+    <label>E-mail <input type="email" id="email" autocomplete="username" required></label>
+    <label>Senha <input type="password" id="senha" autocomplete="current-password" required></label>
+    <div id="loginMsg" class="msg err" hidden></div>
+    <button class="primary" type="submit" id="entrar">Entrar</button>
+  </form>
+</section>
+
+<!-- Aplicação -->
+<main id="app" hidden>
+  <div class="topbar">
+    <h1>Consulta de notas fiscais</h1>
+    <span class="spacer"></span>
+    <span class="who" id="quem"></span>
+    <button id="sair">Sair</button>
+  </div>
+
+  <div class="search">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="q" type="search" autocomplete="off" placeholder="Pesquisar por número da nota, produto, cor, empresa ou fornecedor" aria-label="Pesquisar notas fiscais">
+  </div>
+  <p class="search-help">Use várias palavras para refinar, por exemplo: 1234 preto, ou o nome do produto e a cor.</p>
+  <div class="dates">
+    <label>Emitidas de <input type="date" id="dfrom"></label>
+    <label>até <input type="date" id="dto"></label>
+    <label>Local <select id="floc"><option value="">Todos</option><option value="CD">CD</option><option value="LOJA">LOJA</option><option value="MTD RIO">MTD RIO</option><option value="__none">Sem local</option></select></label>
+    <button id="hoje">Hoje</button>
+    <button id="semana">Últimos 7 dias</button>
+    <button id="mes">Este mês</button>
+    <button id="limpaData">Limpar filtros</button>
+  </div>
+
+  <div class="status" id="status" aria-live="polite">Carregando…</div>
+  <div id="messages" aria-live="polite"></div>
+
+  <details class="panel" id="addPanel" hidden>
+    <summary>Adicionar notas (XML)</summary>
+    <div class="inner">
+      <p>Selecione os XMLs das NF-e. Só os dados extraídos são guardados, o arquivo XML não é enviado. Notas já cadastradas (mesma chave de acesso) são ignoradas.</p>
+      <label class="drop" id="drop">
+        <strong>Arraste os XMLs aqui ou clique para escolher</strong>
+        <span>Pode selecionar vários arquivos de uma vez</span>
+        <input type="file" id="file" accept=".xml,text/xml,application/xml" multiple>
+      </label>
+    </div>
+  </details>
+
+  <details class="panel" id="colorPanel" hidden>
+    <summary>Cores reconhecidas</summary>
+    <div class="inner">
+      <p>A cor não existe como campo na NF-e, então é extraída do texto da descrição quando a nota é adicionada. Uma cor por linha ou separada por vírgula. Qualquer cor pode ser corrigida direto na tabela.</p>
+      <textarea id="colorlist" spellcheck="false"></textarea>
+      <div class="row"><button id="reapply">Aplicar aos itens sem cor</button></div>
+    </div>
+  </details>
+
+  <details class="panel" id="backupPanel" hidden>
+    <summary>Cópia de segurança</summary>
+    <div class="inner">
+      <p>O plano gratuito do Supabase não faz cópia de segurança automática. Baixe um arquivo com todas as notas de tempos em tempos e guarde no seu Drive. Se precisar, é possível restaurar a partir dele.</p>
+      <div class="row">
+        <button class="primary" id="backup">Baixar cópia de segurança (JSON)</button>
+        <label class="drop" style="padding:8px 14px;display:inline-block">Restaurar a partir de um arquivo
+          <input type="file" id="restore" accept=".json,application/json">
+        </label>
+      </div>
+    </div>
+  </details>
+
+  <div id="results"></div>
+  <p class="note-hint">Volumes vêm do bloco de transporte da nota (campo qVol). Quando a nota não informa volumes, aparece apenas o total de itens.</p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
+<script>
+(function () {
+  // ======================= CONFIGURAÇÃO (cole os dois valores) =======================
+  var SUPABASE_URL = "https://znftfecgqbgmsccfvfic.supabase.co";
+  var SUPABASE_ANON_KEY = "sb_publishable_kVU4nEDa1DhvKH3vdoagiw_jmJDT32L";
+  // ====================================================================================
+
+  var DEFAULT_COLORS = [
+    "PRETO","BRANCO","OFF WHITE","AZUL","AZUL MARINHO","MARINHO","AZUL CLARO","VERMELHO","VERDE","AMARELO",
+    "ROSA","PINK","LARANJA","CINZA","CHUMBO","GRAFITE","MARROM","BEGE","CARAMELO","DOURADO","PRATA","ROXO",
+    "LILAS","VINHO","NUDE","CREME","CORAL","SALMAO","TURQUESA","FERRUGEM","MOSTARDA","OLIVA","NAVY","BLACK","WHITE"
+  ];
+  var PAGE = 30;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var sb = null, isEditor = false, colorList = DEFAULT_COLORS.slice();
+  var view = { notas: [], total: 0, cadastradas: 0, itens: 0 };
+  var reqId = 0, busy = false, confirmDel = null, timer = null, loadingMore = false;
+
+  // ---------- utilidades ----------
+  function norm(s) { return String(s == null ? "" : s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase(); }
+  function tokens(s) { return norm(s).replace(/[^A-Z0-9]+/g, " ").trim(); }
+  function titleCase(s) { return s.toLowerCase().replace(/(^|\s)\S/g, function (m) { return m.toUpperCase(); }); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  var nf = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 4 });
+  function fmt(n) { return nf.format(Number(n) || 0); }
+  function fmtDate(iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ""); return m ? m[3] + "/" + m[2] + "/" + m[1] : (iso || ""); }
+  function fmtCnpj(s) {
+    var d = String(s || "").replace(/\D/g, "");
+    if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+    if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+    return String(s || "");
+  }
+  function num(s) { var n = parseFloat(String(s).replace(",", ".")); return isNaN(n) ? 0 : n; }
+  function isoDate(d) { var m = d.getMonth() + 1, day = d.getDate(); return d.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (day < 10 ? "0" : "") + day; }
+
+  function hl(text, terms) {
+    text = String(text == null ? "" : text);
+    if (!terms.length) return esc(text);
+    var n = "", map = [], i, k;
+    for (i = 0; i < text.length; i++) {
+      var c = text[i].normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+      for (k = 0; k < c.length; k++) { n += c[k]; map.push(i); }
+    }
+    var mark = new Array(text.length);
+    terms.forEach(function (t) {
+      var p = 0;
+      while ((p = n.indexOf(t, p)) >= 0) { for (k = p; k < p + t.length; k++) mark[map[k]] = true; p += t.length; }
+    });
+    var out = "", open = false;
+    for (i = 0; i < text.length; i++) {
+      if (mark[i] && !open) { out += "<mark>"; open = true; }
+      else if (!mark[i] && open) { out += "</mark>"; open = false; }
+      out += esc(text[i]);
+    }
+    if (open) out += "</mark>";
+    return out;
+  }
+
+  function say(kind, text) {
+    var d = document.createElement("div");
+    d.className = "msg " + kind;
+    d.textContent = text;
+    $("messages").appendChild(d);
+  }
+  function clearMsgs() { $("messages").textContent = ""; }
+  function isAuthError(err) {
+    var m = String((err && (err.message || err.code)) || "").toLowerCase();
+    return m.indexOf("jwt") >= 0 || m.indexOf("not authenticated") >= 0 || (err && err.status === 401);
+  }
+  function failed(err, fallback) {
+    if (isAuthError(err)) { showLogin("Sua sessão expirou. Entre novamente."); return; }
+    var m = String((err && err.message) || "");
+    if (/row-level security|permission denied/i.test(m)) say("err", "Você não tem permissão para fazer essa alteração.");
+    else say("err", fallback + (m ? " (" + m + ")" : ""));
+  }
+
+  // ---------- cores ----------
+  function detectColor(desc) {
+    var rest = " " + tokens(desc) + " ";
+    var sorted = colorList.slice().sort(function (a, b) { return tokens(b).length - tokens(a).length; });
+    var found = [];
+    sorted.forEach(function (c) {
+      var t = tokens(c);
+      if (!t) return;
+      var key = " " + t + " ";
+      var idx = rest.indexOf(key);
+      if (idx >= 0) {
+        found.push({ idx: idx, name: titleCase(c) });
+        rest = rest.slice(0, idx) + new Array(key.length + 1).join(" ") + rest.slice(idx + key.length);
+      }
+    });
+    found.sort(function (a, b) { return a.idx - b.idx; });
+    return found.map(function (f) { return f.name; }).join(" / ");
+  }
+
+  // ---------- leitura do XML ----------
+  function kid(el, name) {
+    if (!el) return null;
+    for (var i = 0; i < el.children.length; i++) if (el.children[i].localName === name) return el.children[i];
+    return null;
+  }
+  function kids(el, name) {
+    var out = [];
+    if (!el) return out;
+    for (var i = 0; i < el.children.length; i++) if (el.children[i].localName === name) out.push(el.children[i]);
+    return out;
+  }
+  function txt(el) {
+    var cur = el;
+    for (var i = 1; i < arguments.length; i++) cur = kid(cur, arguments[i]);
+    return cur ? cur.textContent.trim() : "";
+  }
+  function parseNfe(text) {
+    var doc = new DOMParser().parseFromString(text, "application/xml");
+    if (doc.getElementsByTagName("parsererror").length) throw new Error("o arquivo não é um XML válido");
+    var infs = Array.prototype.slice.call(doc.getElementsByTagNameNS("*", "infNFe"));
+    if (!infs.length) throw new Error("não encontrei uma NF-e (infNFe) neste arquivo");
+    return infs.map(function (inf) {
+      var ide = kid(inf, "ide"), emit = kid(inf, "emit"), dest = kid(inf, "dest"), transp = kid(inf, "transp");
+      var volumes = 0, hasVol = false;
+      kids(transp, "vol").forEach(function (v) {
+        var q = txt(v, "qVol");
+        if (q) { volumes += num(q); hasVol = true; }
+      });
+      var itens = kids(inf, "det").map(function (det) {
+        var prod = kid(det, "prod");
+        var desc = txt(prod, "xProd");
+        return { descricao: desc, cor: detectColor(desc), quantidade: num(txt(prod, "qCom")), unidade: txt(prod, "uCom"), local: "" };
+      });
+      var chave = (inf.getAttribute("Id") || "").replace(/^NFe/, "");
+      var cnpj = txt(emit, "CNPJ"), numero = txt(ide, "nNF"), serie = txt(ide, "serie");
+      var id = (chave || (cnpj + "-" + serie + "-" + numero)).replace(/[^A-Za-z0-9_\-]/g, "");
+      return {
+        id: id, numero: numero, serie: serie,
+        emissao: (txt(ide, "dhEmi") || txt(ide, "dEmi")).slice(0, 10),
+        emitente: txt(emit, "xNome"), cnpj_emitente: cnpj,
+        destinatario: txt(dest, "xNome"), cnpj_dest: txt(dest, "CNPJ") || txt(dest, "CPF"),
+        volumes: hasVol ? volumes : null,
+        itens: itens
+      };
+    });
+  }
+
+  // ---------- telas ----------
+  function show(which) {
+    $("setup").hidden = which !== "setup";
+    $("login").hidden = which !== "login";
+    $("app").hidden = which !== "app";
+  }
+  function showLogin(msg) {
+    isEditor = false;
+    view = { notas: [], total: 0, cadastradas: 0, itens: 0 };
+    show("login");
+    var m = $("loginMsg");
+    m.hidden = !msg;
+    m.textContent = msg || "";
+    $("senha").value = "";
+    $("entrar").disabled = false;
+  }
+
+  $("loginForm").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    $("entrar").disabled = true;
+    $("loginMsg").hidden = true;
+    var r = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("senha").value });
+    if (r.error) {
+      $("entrar").disabled = false;
+      var m = $("loginMsg");
+      m.hidden = false;
+      m.textContent = /invalid login/i.test(r.error.message || "") ? "E-mail ou senha incorretos." : "Não foi possível entrar. Tente de novo em instantes.";
+      return;
+    }
+    enter(r.data.user);
+  });
+  $("sair").addEventListener("click", async function () { await sb.auth.signOut(); showLogin(); });
+
+  async function enter(user) {
+    $("quem").textContent = user && user.email ? user.email : "";
+    clearMsgs();
+    show("app");
+    var ed = await sb.from("editores").select("user_id");
+    isEditor = !ed.error && ed.data && ed.data.length > 0;
+    ["addPanel", "colorPanel", "backupPanel"].forEach(function (id) { $(id).hidden = !isEditor; });
+    var cfg = await sb.from("config").select("valor").eq("chave", "cores").maybeSingle();
+    if (!cfg.error && cfg.data && Array.isArray(cfg.data.valor) && cfg.data.valor.length) colorList = cfg.data.valor;
+    $("colorlist").value = colorList.join("\n");
+    buscar();
+  }
+
+  // ---------- pesquisa ----------
+  function queryTerms() { return tokens($("q").value).split(" ").filter(Boolean); }
+  function filtrosAtivos() { return queryTerms().length > 0 || $("dfrom").value || $("dto").value || $("floc").value; }
+  function params(offset, limite) {
+    return {
+      termos: queryTerms(),
+      data_de: $("dfrom").value || null,
+      data_ate: $("dto").value || null,
+      local_filtro: $("floc").value || null,
+      limite: limite,
+      deslocamento: offset
+    };
+  }
+
+  async function buscar() {
+    var my = ++reqId;
+    $("status").textContent = "Pesquisando…";
+    var r = await sb.rpc("buscar_notas", params(0, PAGE));
+    if (my !== reqId) return;
+    if (r.error) { $("status").textContent = ""; failed(r.error, "Não consegui pesquisar."); return; }
+    var d = r.data || {};
+    view = { notas: d.notas || [], total: d.total || 0, cadastradas: d.cadastradas || 0, itens: d.itens_cadastrados || 0 };
+    render();
+  }
+  async function maisNotas() {
+    if (loadingMore) return;
+    loadingMore = true;
+    var my = reqId;
+    var r = await sb.rpc("buscar_notas", params(view.notas.length, PAGE));
+    loadingMore = false;
+    if (my !== reqId) return;
+    if (r.error) { failed(r.error, "Não consegui carregar mais notas."); return; }
+    view.notas = view.notas.concat((r.data && r.data.notas) || []);
+    render();
+  }
+
+  function render() {
+    var terms = queryTerms();
+    var s;
+    if (filtrosAtivos()) {
+      s = "<strong>" + fmt(view.total) + "</strong> nota" + (view.total === 1 ? "" : "s") + " encontrada" + (view.total === 1 ? "" : "s") + " de <strong>" + fmt(view.cadastradas) + "</strong> cadastradas";
+    } else {
+      s = "<strong>" + fmt(view.cadastradas) + "</strong> notas cadastradas, <strong>" + fmt(view.itens) + "</strong> itens";
+    }
+    $("status").innerHTML = s + '<span class="spacer"></span>' + (view.total ? '<button id="export">Exportar resultado (CSV)</button>' : "");
+
+    if (!view.notas.length) {
+      $("results").innerHTML = '<div class="empty">' + (filtrosAtivos()
+        ? "Nada encontrado para essa pesquisa. Tente menos palavras, outra grafia ou um período maior."
+        : (isEditor ? "Nenhuma nota cadastrada ainda. Abra “Adicionar notas” acima e selecione os XMLs." : "Nenhuma nota cadastrada ainda.")) + "</div>";
+      return;
+    }
+
+    var html = "";
+    view.notas.forEach(function (n) {
+      var vol = n.volumes === null || n.volumes === undefined
+        ? "volumes não informados na nota"
+        : fmt(n.volumes) + " volume" + (Number(n.volumes) === 1 ? "" : "s") + " no transporte";
+      var itens = n.itens || [];
+      html += '<section class="nota"><div class="nota-head">' +
+        '<h2>Nota ' + hl(n.numero, terms) + '</h2>' +
+        '<span class="dest">' + (n.destinatario ? 'Empresa: <strong>' + hl(n.destinatario, terms) + '</strong>' + (n.cnpj_dest ? ' (' + hl(fmtCnpj(n.cnpj_dest), terms) + ')' : '') : '<span class="vazio-cor">empresa não informada</span>') + '</span>' +
+        '<span class="meta">' + [n.serie ? "série " + esc(n.serie) : "", esc(fmtDate(n.emissao)), n.emitente ? "fornecedor " + hl(n.emitente, terms) : ""].filter(Boolean).join(", ") + '</span>' +
+        '<span class="spacer"></span>' +
+        '<span class="tot">' + fmt(n.qtd_total) + " itens no total, " + vol + '</span>' +
+        (isEditor ? ' <select class="locall" data-nota="' + esc(n.id) + '" aria-label="Marcar o local de todos os itens da nota">' + localOptions("", "Marcar todos como…") + '</select>' : '') +
+        (isEditor ? (confirmDel === n.id
+          ? ' <button class="danger" data-del="' + esc(n.id) + '">Confirmar exclusão</button> <button data-cancel="1">Cancelar</button>'
+          : ' <button data-ask="' + esc(n.id) + '">Excluir nota</button>') : '') +
+        '</div>';
+      if (itens.length !== Number(n.itens_total)) {
+        html += '<div style="padding:6px 14px;color:var(--muted);font-size:13px">Mostrando ' + itens.length + " de " + n.itens_total + " itens desta nota</div>";
+      }
+      html += '<div class="scroller"><table><thead><tr><th>Descrição</th><th>Cor</th><th class="num">Quantidade</th><th>Un.</th><th>Local</th></tr></thead><tbody>';
+      itens.forEach(function (it) {
+        html += '<tr><td class="desc">' + hl(it.descricao, terms) + '</td><td>' +
+          (isEditor
+            ? '<input class="cor' + (it.cor ? "" : " vazia") + '" data-item="' + it.id + '" value="' + esc(it.cor || "") + '" placeholder="Informar cor" aria-label="Cor do item">'
+            : (it.cor ? hl(it.cor, terms) : '<span class="vazio-cor">não identificada</span>')) +
+          '</td><td class="num">' + fmt(it.quantidade) + '</td><td>' + esc(it.unidade) + '</td><td>' +
+          (isEditor
+            ? '<select class="loc" data-item="' + it.id + '" aria-label="Local do item">' + localOptions(it.local || "", "Classificar…") + '</select>'
+            : (it.local ? hl(it.local, terms) : '<span class="vazio-cor">não classificado</span>')) +
+          '</td></tr>';
+      });
+      html += "</tbody></table></div></section>";
+    });
+    if (view.notas.length < view.total) {
+      html += '<button class="more" id="more">Mostrar mais notas (' + (view.total - view.notas.length) + " restantes)</button>";
+    }
+    $("results").innerHTML = html;
+  }
+
+  var LOCAIS = ["CD", "LOJA", "MTD RIO"];
+  function localOptions(cur, emptyLabel) {
+    var h = '<option value="">' + esc(emptyLabel) + '</option>';
+    LOCAIS.forEach(function (l) { h += '<option value="' + l + '"' + (cur === l ? " selected" : "") + ">" + l + "</option>"; });
+    return h;
+  }
+
+  // ---------- filtros ----------
+  function agendarBusca() { clearTimeout(timer); timer = setTimeout(buscar, 250); }
+  $("q").addEventListener("input", agendarBusca);
+  ["dfrom", "dto", "floc"].forEach(function (id) { $(id).addEventListener("change", buscar); });
+  function setRange(a, b) { $("dfrom").value = a; $("dto").value = b; buscar(); }
+  $("hoje").addEventListener("click", function () { var t = isoDate(new Date()); setRange(t, t); });
+  $("semana").addEventListener("click", function () { var d = new Date(); d.setDate(d.getDate() - 6); setRange(isoDate(d), isoDate(new Date())); });
+  $("mes").addEventListener("click", function () { var n = new Date(); setRange(isoDate(new Date(n.getFullYear(), n.getMonth(), 1)), isoDate(new Date(n.getFullYear(), n.getMonth() + 1, 0))); });
+  $("limpaData").addEventListener("click", function () { $("q").value = ""; $("floc").value = ""; setRange("", ""); });
+
+  $("status").addEventListener("click", function (e) { if (e.target && e.target.id === "export") exportarCsv(); });
+
+  // ---------- edição (somente editores) ----------
+  function findItem(id) {
+    for (var i = 0; i < view.notas.length; i++) {
+      var its = view.notas[i].itens || [];
+      for (var k = 0; k < its.length; k++) if (String(its[k].id) === String(id)) return its[k];
+    }
+    return null;
+  }
+
+  $("results").addEventListener("click", async function (e) {
+    var t = e.target;
+    if (!t || !t.getAttribute) return;
+    if (t.id === "more") { maisNotas(); return; }
+    var ask = t.getAttribute("data-ask");
+    if (ask) { confirmDel = ask; render(); return; }
+    if (t.getAttribute("data-cancel")) { confirmDel = null; render(); return; }
+    var del = t.getAttribute("data-del");
+    if (del) {
+      confirmDel = null;
+      var r = await sb.from("notas").delete().eq("id", del);
+      if (r.error) { failed(r.error, "Não consegui excluir a nota."); render(); return; }
+      view.notas = view.notas.filter(function (n) { return n.id !== del; });
+      view.total = Math.max(0, view.total - 1);
+      view.cadastradas = Math.max(0, view.cadastradas - 1);
+      render();
+    }
+  });
+
+  $("results").addEventListener("change", async function (e) {
+    var t = e.target;
+    if (!t.classList || !isEditor) return;
+    if (t.classList.contains("cor")) {
+      var it = findItem(t.getAttribute("data-item"));
+      if (!it) return;
+      var val = t.value.trim();
+      if (val === (it.cor || "")) return;
+      var r = await sb.from("itens").update({ cor: val || null }).eq("id", it.id);
+      if (r.error) { failed(r.error, "Não consegui salvar a cor."); t.value = it.cor || ""; return; }
+      it.cor = val || null;
+      t.classList.toggle("vazia", !val);
+    } else if (t.classList.contains("loc")) {
+      var it2 = findItem(t.getAttribute("data-item"));
+      if (!it2) return;
+      var v2 = t.value;
+      if (v2 === (it2.local || "")) return;
+      var r2 = await sb.from("itens").update({ local: v2 || null }).eq("id", it2.id);
+      if (r2.error) { failed(r2.error, "Não consegui salvar o local."); t.value = it2.local || ""; return; }
+      it2.local = v2 || null;
+    } else if (t.classList.contains("locall")) {
+      var notaId = t.getAttribute("data-nota"), v3 = t.value;
+      t.value = "";
+      if (!v3) return;
+      var r3 = await sb.from("itens").update({ local: v3 }).eq("nota_id", notaId);
+      if (r3.error) { failed(r3.error, "Não consegui salvar o local."); return; }
+      view.notas.forEach(function (n) { if (n.id === notaId) (n.itens || []).forEach(function (i) { i.local = v3; }); });
+      render();
+    }
+  });
+
+  // ---------- importação de XML ----------
+  function readText(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(String(r.result)); };
+      r.onerror = function () { reject(new Error("não consegui ler o arquivo")); };
+      r.readAsText(file);
+    });
+  }
+  async function enviarLotes(lista, rotulo) {
+    var BATCH = 20, novas = 0, existentes = 0, erros = 0;
+    for (var i = 0; i < lista.length; i += BATCH) {
+      $("status").textContent = rotulo + " " + Math.min(i + BATCH, lista.length) + " de " + lista.length + "…";
+      var r = await sb.rpc("importar_notas", { p: lista.slice(i, i + BATCH) });
+      if (r.error) {
+        erros += Math.min(BATCH, lista.length - i);
+        failed(r.error, "Falha ao salvar um lote de notas.");
+        if (isAuthError(r.error)) return null;
+      } else {
+        novas += (r.data && r.data.novas) || 0;
+        existentes += (r.data && r.data.existentes) || 0;
+      }
+    }
+    return { novas: novas, existentes: existentes, erros: erros };
+  }
+  function resumoEnvio(res) {
+    if (!res) return;
+    if (res.novas) say("ok", res.novas + " nota" + (res.novas === 1 ? " adicionada" : "s adicionadas") + ".");
+    if (res.existentes) say("warn", res.existentes + " nota" + (res.existentes === 1 ? " já estava cadastrada e foi ignorada" : "s já estavam cadastradas e foram ignoradas") + ".");
+    if (res.erros) say("err", res.erros + " nota" + (res.erros === 1 ? " não foi salva" : "s não foram salvas") + ". Tente enviar de novo.");
+  }
+
+  async function handleFiles(list) {
+    if (busy || !isEditor) return;
+    var files = Array.prototype.slice.call(list).filter(function (f) { return /\.xml$/i.test(f.name) || f.type.indexOf("xml") >= 0; });
+    clearMsgs();
+    if (!files.length) { say("err", "Nenhum arquivo XML encontrado na seleção."); return; }
+    busy = true;
+    var notas = [], seen = {};
+    for (var f = 0; f < files.length; f++) {
+      try {
+        parseNfe(await readText(files[f])).forEach(function (n) {
+          if (!seen[n.id]) { seen[n.id] = true; notas.push(n); }
+        });
+      } catch (e) { say("err", files[f].name + ": " + e.message + "."); }
+    }
+    if (notas.length) resumoEnvio(await enviarLotes(notas, "Salvando notas"));
+    busy = false;
+    buscar();
+  }
+  $("file").addEventListener("change", function () { handleFiles($("file").files); $("file").value = ""; });
+  var drop = $("drop");
+  ["dragenter", "dragover"].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add("over"); }); });
+  ["dragleave", "drop"].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove("over"); }); });
+  drop.addEventListener("drop", function (e) { if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files); });
+
+  // ---------- cores (compartilhadas) ----------
+  $("colorlist").addEventListener("change", async function () {
+    if (!isEditor) return;
+    var arr = $("colorlist").value.split(/[\n,;]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!arr.length) arr = DEFAULT_COLORS.slice();
+    colorList = arr;
+    var r = await sb.from("config").upsert({ chave: "cores", valor: arr });
+    if (r.error) failed(r.error, "Não consegui salvar a lista de cores.");
+  });
+
+  $("reapply").addEventListener("click", async function () {
+    if (busy || !isEditor) return;
+    busy = true; clearMsgs();
+    var last = 0, changed = 0, ok = true;
+    while (ok) {
+      $("status").textContent = "Aplicando cores… " + changed + " itens atualizados até agora";
+      var r = await sb.from("itens").select("id,descricao").is("cor", null).gt("id", last).order("id").limit(1000);
+      if (r.error) { failed(r.error, "Não consegui ler os itens."); ok = false; break; }
+      var rows = r.data || [];
+      if (!rows.length) break;
+      last = rows[rows.length - 1].id;
+      var upd = [];
+      rows.forEach(function (it) { var c = detectColor(it.descricao); if (c) upd.push({ id: it.id, cor: c }); });
+      if (upd.length) {
+        var u = await sb.rpc("atualizar_cores", { p: upd });
+        if (u.error) { failed(u.error, "Não consegui atualizar as cores."); ok = false; break; }
+        changed += upd.length;
+      }
+    }
+    busy = false;
+    if (ok) say(changed ? "ok" : "warn", changed ? changed + " iten" + (changed === 1 ? "" : "s") + " ganharam cor." : "Nenhum item sem cor passou a ter cor reconhecida.");
+    buscar();
+  });
+
+  // ---------- exportações ----------
+  function baixar(nome, texto, tipo) {
+    var blob = new Blob([texto], { type: tipo });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = nome;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  async function todas(baseParams) {
+    var out = [], off = 0, SIZE = 200;
+    while (true) {
+      var p = Object.assign({}, baseParams, { limite: SIZE, deslocamento: off });
+      var r = await sb.rpc("buscar_notas", p);
+      if (r.error) throw r.error;
+      var lote = (r.data && r.data.notas) || [];
+      out = out.concat(lote);
+      if (lote.length < SIZE) break;
+      off += SIZE;
+      $("status").textContent = "Reunindo notas… " + out.length;
+    }
+    return out;
+  }
+  function csvCell(v) { var s = String(v == null ? "" : v); return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+  function csvNum(n) { return String(n).replace(".", ","); }
+
+  async function exportarCsv() {
+    if (busy) return;
+    busy = true;
+    try {
+      var notas = await todas(params(0, 200));
+      var rows = [["Nota", "Série", "Emissão", "Empresa", "CNPJ da empresa", "Fornecedor", "Descrição", "Cor", "Quantidade", "Unidade", "Local", "Volumes da nota", "Total de itens da nota"]];
+      notas.forEach(function (n) {
+        (n.itens || []).forEach(function (it) {
+          rows.push([n.numero, n.serie, fmtDate(n.emissao), n.destinatario, fmtCnpj(n.cnpj_dest), n.emitente, it.descricao, it.cor || "",
+            csvNum(it.quantidade), it.unidade, it.local || "", n.volumes === null || n.volumes === undefined ? "" : csvNum(n.volumes), csvNum(n.qtd_total)]);
+        });
+      });
+      baixar("notas-fiscais-" + isoDate(new Date()) + ".csv", "\uFEFF" + rows.map(function (r) { return r.map(csvCell).join(";"); }).join("\r\n"), "text/csv;charset=utf-8");
+    } catch (err) { failed(err, "Não consegui exportar."); }
+    busy = false;
+    render();
+  }
+
+  $("backup").addEventListener("click", async function () {
+    if (busy || !isEditor) return;
+    busy = true; clearMsgs();
+    try {
+      var notas = await todas({ termos: [], data_de: null, data_ate: null, local_filtro: null });
+      baixar("backup-notas-" + isoDate(new Date()) + ".json", JSON.stringify({ versao: 1, gerado_em: new Date().toISOString(), notas: notas }), "application/json");
+      say("ok", "Cópia de segurança baixada com " + notas.length + " notas. Guarde o arquivo no seu Drive.");
+    } catch (err) { failed(err, "Não consegui gerar a cópia de segurança."); }
+    busy = false;
+    render();
+  });
+
+  $("restore").addEventListener("change", async function () {
+    var file = $("restore").files[0];
+    $("restore").value = "";
+    if (!file || busy || !isEditor) return;
+    busy = true; clearMsgs();
+    try {
+      var data = JSON.parse(await readText(file));
+      var lista = (data.notas || []).map(function (n) {
+        return {
+          id: n.id, numero: n.numero, serie: n.serie, emissao: n.emissao, emitente: n.emitente, cnpj_emitente: n.cnpj_emitente,
+          destinatario: n.destinatario, cnpj_dest: n.cnpj_dest, volumes: n.volumes,
+          itens: (n.itens || []).map(function (i) { return { descricao: i.descricao, cor: i.cor, quantidade: i.quantidade, unidade: i.unidade, local: i.local }; })
+        };
+      }).filter(function (n) { return n.id && n.numero; });
+      if (!lista.length) say("err", "O arquivo não tem notas para restaurar.");
+      else resumoEnvio(await enviarLotes(lista, "Restaurando notas"));
+    } catch (err) { say("err", "Não consegui ler o arquivo de cópia de segurança."); }
+    busy = false;
+    buscar();
+  });
+
+  // ---------- início ----------
+  function configurado() { return SUPABASE_URL.indexOf("http") === 0 && SUPABASE_ANON_KEY.indexOf("COLE_AQUI") < 0; }
+  (async function init() {
+    if (!configurado() || !window.supabase) { show("setup"); return; }
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sb.auth.onAuthStateChange(function (evento) { if (evento === "SIGNED_OUT") showLogin(); });
+    var s = await sb.auth.getSession();
+    if (s.data && s.data.session) enter(s.data.session.user);
+    else showLogin();
+  })();
+})();
+</script>
+</body>
+</html>
