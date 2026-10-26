@@ -126,6 +126,7 @@
   input.cor.vazia { background: var(--warn-bg); color: var(--warn-ink); }
   input.cor.vazia::placeholder { color: var(--warn-ink); opacity: 0.8; }
   .vazio-cor { color: var(--muted); }
+  .ean { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .empty { padding: 40px 20px; text-align: center; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
   .more { display: block; margin: 8px auto 0; }
   .note-hint { color: var(--muted); font-size: 13px; margin-top: 18px; max-width: 70ch; }
@@ -169,6 +170,7 @@
     <label>Emitidas de <input type="date" id="dfrom"></label>
     <label>até <input type="date" id="dto"></label>
     <label>Empresa <select id="femp"><option value="">Todas</option></select></label>
+    <label>Tamanho <select id="ftam"><option value="">Todos</option></select></label>
     <label>Local <select id="floc"><option value="">Todos</option><option value="CD">CD</option><option value="LOJA">LOJA</option><option value="MTD RIO">MTD RIO</option><option value="__none">Sem local</option></select></label>
     <button id="hoje">Hoje</button>
     <button id="semana">Últimos 7 dias</button>
@@ -335,6 +337,16 @@
     for (var i = 1; i < arguments.length; i++) cur = kid(cur, arguments[i]);
     return cur ? cur.textContent.trim() : "";
   }
+  // Alpargatas (Havaianas): os 3 últimos dígitos do código do produto trazem o tamanho (334 = 33/34, 356 = 35/36, 390 = 39/40)
+  function tamanhoAlpargatas(cod) {
+    cod = String(cod || "");
+    var m = /(\d{2})(\d)$/.exec(cod);
+    if (!m || cod.length < 10) return "";
+    var a = parseInt(m[1], 10), ult = parseInt(m[2], 10);
+    if (a < 17 || a > 50) return "";
+    var b = a + 1;
+    return (b % 10 === ult) ? a + "/" + b : "";
+  }
   function parseNfe(text) {
     var doc = new DOMParser().parseFromString(text, "application/xml");
     if (doc.getElementsByTagName("parsererror").length) throw new Error("o arquivo não é um XML válido");
@@ -347,10 +359,15 @@
         var q = txt(v, "qVol");
         if (q) { volumes += num(q); hasVol = true; }
       });
+      var alpargatas = txt(emit, "CNPJ").indexOf("61079117") === 0;
       var itens = kids(inf, "det").map(function (det) {
         var prod = kid(det, "prod");
         var desc = txt(prod, "xProd");
-        return { descricao: desc, cor: detectColor(desc), quantidade: num(txt(prod, "qCom")), unidade: txt(prod, "uCom"), local: "" };
+        var ean = txt(prod, "cEANTrib") || txt(prod, "cEAN");
+        if (!/^\d{8,14}$/.test(ean)) ean = "";
+        var cod = txt(prod, "cProd");
+        return { descricao: desc, cor: detectColor(desc), quantidade: num(txt(prod, "qCom")), unidade: txt(prod, "uCom"), local: "",
+                 ean: ean, cod_produto: cod, tamanho: alpargatas ? tamanhoAlpargatas(cod) : "" };
       });
       var chave = (inf.getAttribute("Id") || "").replace(/^NFe/, "");
       var cnpj = txt(emit, "CNPJ"), numero = txt(ide, "nNF"), serie = txt(ide, "serie");
@@ -414,7 +431,18 @@
   }
 
   // ---------- lista de empresas (filtro) ----------
+  async function carregarTamanhos() {
+    var r = await sb.rpc("listar_tamanhos");
+    if (r.error || !Array.isArray(r.data)) return;
+    var sel = $("ftam"), atual = sel.value;
+    var h = '<option value="">Todos</option>';
+    r.data.forEach(function (t) { h += '<option value="' + esc(t) + '">' + esc(t) + "</option>"; });
+    sel.innerHTML = h;
+    sel.value = atual;
+    if (sel.value !== atual) sel.value = "";
+  }
   async function carregarEmpresas() {
+    carregarTamanhos();
     var r = await sb.rpc("listar_empresas");
     if (r.error || !Array.isArray(r.data)) return;
     var sel = $("femp"), atual = sel.value;
@@ -429,7 +457,7 @@
 
   // ---------- pesquisa ----------
   function queryTerms() { return tokens($("q").value).split(" ").filter(Boolean); }
-  function filtrosAtivos() { return queryTerms().length > 0 || $("dfrom").value || $("dto").value || $("floc").value || $("femp").value; }
+  function filtrosAtivos() { return queryTerms().length > 0 || $("dfrom").value || $("dto").value || $("floc").value || $("femp").value || $("ftam").value; }
   function params(offset, limite) {
     return {
       termos: queryTerms(),
@@ -437,6 +465,7 @@
       data_ate: $("dto").value || null,
       local_filtro: $("floc").value || null,
       empresa_filtro: $("femp").value || null,
+      tamanho_filtro: $("ftam").value || null,
       limite: limite,
       deslocamento: offset
     };
@@ -501,13 +530,13 @@
       if (itens.length !== Number(n.itens_total)) {
         html += '<div style="padding:6px 14px;color:var(--muted);font-size:13px">Mostrando ' + itens.length + " de " + n.itens_total + " itens desta nota</div>";
       }
-      html += '<div class="scroller"><table><thead><tr><th>Descrição</th><th>Cor</th><th class="num">Quantidade</th><th>Un.</th><th>Local</th></tr></thead><tbody>';
+      html += '<div class="scroller"><table><thead><tr><th>Descrição</th><th>Cor</th><th>Tam.</th><th class="num">Quantidade</th><th>Un.</th><th>Local</th></tr></thead><tbody>';
       itens.forEach(function (it) {
-        html += '<tr><td class="desc">' + hl(it.descricao, terms) + '</td><td>' +
+        html += '<tr><td class="desc">' + hl(it.descricao, terms) + (it.ean ? '<div class="ean">EAN ' + hl(it.ean, terms) + '</div>' : '') + '</td><td>' +
           (isEditor
             ? '<input class="cor' + (it.cor ? "" : " vazia") + '" data-item="' + it.id + '" value="' + esc(it.cor || "") + '" placeholder="Informar cor" aria-label="Cor do item">'
             : (it.cor ? hl(it.cor, terms) : '<span class="vazio-cor">não identificada</span>')) +
-          '</td><td class="num">' + fmt(it.quantidade) + '</td><td>' + esc(it.unidade) + '</td><td>' +
+          '</td><td>' + (it.tamanho ? hl(it.tamanho, terms) : '<span class="vazio-cor">—</span>') + '</td><td class="num">' + fmt(it.quantidade) + '</td><td>' + esc(it.unidade) + '</td><td>' +
           (isEditor
             ? '<select class="loc" data-item="' + it.id + '" aria-label="Local do item">' + localOptions(it.local || "", "Classificar…") + '</select>'
             : (it.local ? hl(it.local, terms) : '<span class="vazio-cor">não classificado</span>')) +
@@ -531,12 +560,12 @@
   // ---------- filtros ----------
   function agendarBusca() { clearTimeout(timer); timer = setTimeout(buscar, 250); }
   $("q").addEventListener("input", agendarBusca);
-  ["dfrom", "dto", "floc", "femp"].forEach(function (id) { $(id).addEventListener("change", buscar); });
+  ["dfrom", "dto", "floc", "femp", "ftam"].forEach(function (id) { $(id).addEventListener("change", buscar); });
   function setRange(a, b) { $("dfrom").value = a; $("dto").value = b; buscar(); }
   $("hoje").addEventListener("click", function () { var t = isoDate(new Date()); setRange(t, t); });
   $("semana").addEventListener("click", function () { var d = new Date(); d.setDate(d.getDate() - 6); setRange(isoDate(d), isoDate(new Date())); });
   $("mes").addEventListener("click", function () { var n = new Date(); setRange(isoDate(new Date(n.getFullYear(), n.getMonth(), 1)), isoDate(new Date(n.getFullYear(), n.getMonth() + 1, 0))); });
-  $("limpaData").addEventListener("click", function () { $("q").value = ""; $("floc").value = ""; $("femp").value = ""; setRange("", ""); });
+  $("limpaData").addEventListener("click", function () { $("q").value = ""; $("floc").value = ""; $("femp").value = ""; $("ftam").value = ""; setRange("", ""); });
 
   $("status").addEventListener("click", function (e) { if (e.target && e.target.id === "export") exportarCsv(); });
 
@@ -610,7 +639,7 @@
     });
   }
   async function enviarLotes(lista, rotulo) {
-    var BATCH = 20, novas = 0, existentes = 0, erros = 0;
+    var BATCH = 20, novas = 0, existentes = 0, atualizadas = 0, erros = 0;
     for (var i = 0; i < lista.length; i += BATCH) {
       $("status").textContent = rotulo + " " + Math.min(i + BATCH, lista.length) + " de " + lista.length + "…";
       var r = await sb.rpc("importar_notas", { p: lista.slice(i, i + BATCH) });
@@ -621,13 +650,15 @@
       } else {
         novas += (r.data && r.data.novas) || 0;
         existentes += (r.data && r.data.existentes) || 0;
+        atualizadas += (r.data && r.data.atualizadas) || 0;
       }
     }
-    return { novas: novas, existentes: existentes, erros: erros };
+    return { novas: novas, existentes: existentes, atualizadas: atualizadas, erros: erros };
   }
   function resumoEnvio(res) {
     if (!res) return;
     if (res.novas) say("ok", res.novas + " nota" + (res.novas === 1 ? " adicionada" : "s adicionadas") + ".");
+    if (res.atualizadas) say("ok", res.atualizadas + " nota" + (res.atualizadas === 1 ? " já cadastrada ganhou" : "s já cadastradas ganharam") + " tamanho, EAN ou código do produto.");
     if (res.existentes) say("warn", res.existentes + " nota" + (res.existentes === 1 ? " já estava cadastrada e foi ignorada" : "s já estavam cadastradas e foram ignoradas") + ".");
     if (res.erros) say("err", res.erros + " nota" + (res.erros === 1 ? " não foi salva" : "s não foram salvas") + ". Tente enviar de novo.");
   }
@@ -723,10 +754,10 @@
     busy = true;
     try {
       var notas = await todas(params(0, 200));
-      var rows = [["Nota", "Série", "Emissão", "Empresa", "CNPJ da empresa", "Fornecedor", "Descrição", "Cor", "Quantidade", "Unidade", "Local", "Volumes da nota", "Total de itens da nota"]];
+      var rows = [["Nota", "Série", "Emissão", "Empresa", "CNPJ da empresa", "Fornecedor", "Descrição", "Cor", "Tamanho", "EAN", "Código do produto", "Quantidade", "Unidade", "Local", "Volumes da nota", "Total de itens da nota"]];
       notas.forEach(function (n) {
         (n.itens || []).forEach(function (it) {
-          rows.push([n.numero, n.serie, fmtDate(n.emissao), n.destinatario, fmtCnpj(n.cnpj_dest), n.emitente, it.descricao, it.cor || "",
+          rows.push([n.numero, n.serie, fmtDate(n.emissao), n.destinatario, fmtCnpj(n.cnpj_dest), n.emitente, it.descricao, it.cor || "", it.tamanho || "", it.ean ? '="' + it.ean + '"' : "", it.cod_produto ? '="' + it.cod_produto + '"' : "",
             csvNum(it.quantidade), it.unidade, it.local || "", n.volumes === null || n.volumes === undefined ? "" : csvNum(n.volumes), csvNum(n.qtd_total)]);
         });
       });
@@ -759,7 +790,7 @@
         return {
           id: n.id, numero: n.numero, serie: n.serie, emissao: n.emissao, emitente: n.emitente, cnpj_emitente: n.cnpj_emitente,
           destinatario: n.destinatario, cnpj_dest: n.cnpj_dest, volumes: n.volumes,
-          itens: (n.itens || []).map(function (i) { return { descricao: i.descricao, cor: i.cor, quantidade: i.quantidade, unidade: i.unidade, local: i.local }; })
+          itens: (n.itens || []).map(function (i) { return { descricao: i.descricao, cor: i.cor, quantidade: i.quantidade, unidade: i.unidade, local: i.local, ean: i.ean, cod_produto: i.cod_produto, tamanho: i.tamanho }; })
         };
       }).filter(function (n) { return n.id && n.numero; });
       if (!lista.length) say("err", "O arquivo não tem notas para restaurar.");
