@@ -113,6 +113,7 @@
   .nota-head .meta { color: var(--muted); font-size: 13px; }
   .nota-head .tot { font-size: 13px; font-weight: 500; }
   .nota-head .dest { font-size: 14px; }
+  .nota-head .rem { font-size: 14px; }
   .scroller { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; min-width: 640px; }
   thead th { text-align: left; font-weight: 500; font-size: 13px; color: var(--muted); padding: 8px 14px; border-bottom: 1px solid var(--line); }
@@ -163,7 +164,7 @@
 
   <div class="search">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-    <input id="q" type="search" autocomplete="off" placeholder="Pesquisar por número da nota, produto, cor, empresa ou fornecedor" aria-label="Pesquisar notas fiscais">
+    <input id="q" type="search" autocomplete="off" placeholder="Pesquisar por nota, remessa, produto, cor, empresa ou fornecedor" aria-label="Pesquisar notas fiscais">
   </div>
   <p class="search-help">Use várias palavras para refinar, por exemplo: 1234 preto, ou o nome do produto e a cor.</p>
   <div class="dates">
@@ -360,6 +361,8 @@
         if (q) { volumes += num(q); hasVol = true; }
       });
       var alpargatas = txt(emit, "CNPJ").indexOf("61079117") === 0;
+      var cpl = txt(inf, "infAdic", "infCpl").replace(/\s+/g, " ");
+      var mRem = /REMESSA\s*[:.\-]?\s*(\d{4,})/i.exec(cpl);
       var itens = kids(inf, "det").map(function (det) {
         var prod = kid(det, "prod");
         var desc = txt(prod, "xProd");
@@ -378,6 +381,7 @@
         emitente: txt(emit, "xNome"), cnpj_emitente: cnpj,
         destinatario: txt(dest, "xNome"), cnpj_dest: txt(dest, "CNPJ") || txt(dest, "CPF"),
         volumes: hasVol ? volumes : null,
+        remessa: mRem ? mRem[1] : "",
         itens: itens
       };
     });
@@ -518,6 +522,7 @@
       var itens = n.itens || [];
       html += '<section class="nota"><div class="nota-head">' +
         '<h2>Nota ' + hl(n.numero, terms) + '</h2>' +
+        (n.remessa ? '<span class="rem">Remessa <strong>' + hl(n.remessa, terms) + '</strong></span>' : '') +
         '<span class="dest">' + (n.destinatario ? 'Empresa: <strong>' + hl(n.destinatario, terms) + '</strong>' + (n.cnpj_dest ? ' (' + hl(fmtCnpj(n.cnpj_dest), terms) + ')' : '') : '<span class="vazio-cor">empresa não informada</span>') + '</span>' +
         '<span class="meta">' + [n.serie ? "série " + esc(n.serie) : "", esc(fmtDate(n.emissao)), n.emitente ? "fornecedor " + hl(n.emitente, terms) : ""].filter(Boolean).join(", ") + '</span>' +
         '<span class="spacer"></span>' +
@@ -754,10 +759,10 @@
     busy = true;
     try {
       var notas = await todas(params(0, 200));
-      var rows = [["Nota", "Série", "Emissão", "Empresa", "CNPJ da empresa", "Fornecedor", "Descrição", "Cor", "Tamanho", "EAN", "Código do produto", "Quantidade", "Unidade", "Local", "Volumes da nota", "Total de itens da nota"]];
+      var rows = [["Nota", "Remessa", "Série", "Emissão", "Empresa", "CNPJ da empresa", "Fornecedor", "Descrição", "Cor", "Tamanho", "EAN", "Código do produto", "Quantidade", "Unidade", "Local", "Volumes da nota", "Total de itens da nota"]];
       notas.forEach(function (n) {
         (n.itens || []).forEach(function (it) {
-          rows.push([n.numero, n.serie, fmtDate(n.emissao), n.destinatario, fmtCnpj(n.cnpj_dest), n.emitente, it.descricao, it.cor || "", it.tamanho || "", it.ean ? '="' + it.ean + '"' : "", it.cod_produto ? '="' + it.cod_produto + '"' : "",
+          rows.push([n.numero, n.remessa || "", n.serie, fmtDate(n.emissao), n.destinatario, fmtCnpj(n.cnpj_dest), n.emitente, it.descricao, it.cor || "", it.tamanho || "", it.ean ? '="' + it.ean + '"' : "", it.cod_produto ? '="' + it.cod_produto + '"' : "",
             csvNum(it.quantidade), it.unidade, it.local || "", n.volumes === null || n.volumes === undefined ? "" : csvNum(n.volumes), csvNum(n.qtd_total)]);
         });
       });
@@ -788,7 +793,7 @@
       var data = JSON.parse(await readText(file));
       var lista = (data.notas || []).map(function (n) {
         return {
-          id: n.id, numero: n.numero, serie: n.serie, emissao: n.emissao, emitente: n.emitente, cnpj_emitente: n.cnpj_emitente,
+          id: n.id, numero: n.numero, remessa: n.remessa, serie: n.serie, emissao: n.emissao, emitente: n.emitente, cnpj_emitente: n.cnpj_emitente,
           destinatario: n.destinatario, cnpj_dest: n.cnpj_dest, volumes: n.volumes,
           itens: (n.itens || []).map(function (i) { return { descricao: i.descricao, cor: i.cor, quantidade: i.quantidade, unidade: i.unidade, local: i.local, ean: i.ean, cod_produto: i.cod_produto, tamanho: i.tamanho }; })
         };
