@@ -1075,11 +1075,16 @@
       '<button data-pdf="__geral"' + (t.notas ? "" : " disabled") + '>Baixar pedido geral (PDF)</button>';
     if (isEditor) {
       h += '<span class="spacer"></span>';
-      if (ent.confirm === "reabrir") {
+      if (ent.confirm === "cd") {
+        var foraCD = ent.linhas.filter(function (l) { return localNota(l).texto !== "CD"; }).length;
+        h += '<button class="primary" id="entCDOk">Confirmar: marcar as ' + esc(fmt(t.notas)) + ' notas como CD</button><button id="entCancel">Cancelar</button>';
+        h += '<span class="vazio-cor" style="flex-basis:100%;font-size:13px">Todos os itens das notas deste carrinho passam para o local CD' + (foraCD ? ", inclusive os que hoje estão em outro lugar ou sem local (" + esc(plural(foraCD, "nota", "notas")) + ")" : "") + ".</span>";
+      } else if (ent.confirm === "reabrir") {
         h += '<button class="primary" id="entReabrirOk">Confirmar: reabrir e fechar o de ' + esc(fmtDate(ent.aberta)) + '</button><button id="entCancel">Cancelar</button>';
       } else if (ent.confirm === "excluir") {
         h += '<button class="danger" id="entDelOk">Confirmar: excluir o carrinho de ' + esc(fmtDate(ent.ativa)) + '</button><button id="entCancel">Cancelar</button>';
       } else {
+        if (t.notas) h += '<button id="entCD">Mover tudo para o CD</button>';
         h += aberto ? '<button id="entFechar">Fechar carrinho</button>' : '<button id="entReabrir">Reabrir carrinho</button>';
         h += '<button class="danger" id="entDel">Excluir carrinho</button>';
       }
@@ -1203,6 +1208,22 @@
     var d = ent.ativa;
     if (t.id === "entCancel") { ent.confirm = null; renderEntrega(); return; }
     if (t.id === "entDel") { ent.confirm = "excluir"; renderEntrega(); return; }
+    if (t.id === "entCD") { ent.confirm = "cd"; renderEntrega(); return; }
+    if (t.id === "entCDOk") {
+      ent.confirm = null;
+      var ids = ent.linhas.map(function (l) { return l.nota_id; }).filter(function (x, i, a) { return a.indexOf(x) === i; });
+      t.disabled = true; t.textContent = "Movendo…";
+      var ok = 0, erro = null;
+      for (var i = 0; i < ids.length; i++) {
+        var rc = await sb.from("itens").update({ local: "CD" }).eq("nota_id", ids[i]);
+        if (rc.error) { erro = rc.error; break; }
+        ok++;
+      }
+      entClear();
+      if (erro) failed(erro, "Parei no meio: " + plural(ok, "nota foi marcada", "notas foram marcadas") + " como CD, as outras não.");
+      else entSay("ok", plural(ok, "nota do carrinho foi marcada", "notas do carrinho foram marcadas") + " como CD. A coluna Local, a aba Notas, o Excel e o PDF já mostram o novo local.");
+      await abrirEntrega(d); render(); return;
+    }
     if (t.id === "entFechar") {
       var rf = await sb.rpc("fechar_entrega", { p_data: d });
       if (rf.error) { failed(rf.error, "Não consegui fechar o carrinho."); return; }
