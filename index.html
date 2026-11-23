@@ -172,7 +172,7 @@
     <label>até <input type="date" id="dto"></label>
     <label>Empresa <select id="femp"><option value="">Todas</option></select></label>
     <label>Tamanho <select id="ftam"><option value="">Todos</option></select></label>
-    <label>Local <select id="floc"><option value="">Todos</option><option value="CD">CD</option><option value="LOJA">LOJA</option><option value="MTD RIO">MTD RIO</option><option value="__none">Sem local</option></select></label>
+    <label>Local <select id="floc"><option value="">Todos</option><option value="CD">CD</option><option value="LOJA">LOJA</option><option value="MTD RIO">MTD RIO</option><option value="DOCA 1">DOCA 1</option><option value="DOCA 2">DOCA 2</option><option value="DOCA 3">DOCA 3</option><option value="__none">Sem local</option></select></label>
     <button id="hoje">Hoje</button>
     <button id="semana">Últimos 7 dias</button>
     <button id="mes">Este mês</button>
@@ -555,7 +555,7 @@
     $("results").innerHTML = html;
   }
 
-  var LOCAIS = ["CD", "LOJA", "MTD RIO"];
+  var LOCAIS = ["CD", "LOJA", "MTD RIO", "DOCA 1", "DOCA 2", "DOCA 3"];
   function localOptions(cur, emptyLabel) {
     var h = '<option value="">' + esc(emptyLabel) + '</option>';
     LOCAIS.forEach(function (l) { h += '<option value="' + l + '"' + (cur === l ? " selected" : "") + ">" + l + "</option>"; });
