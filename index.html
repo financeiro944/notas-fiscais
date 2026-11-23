@@ -157,6 +157,12 @@
   .ent-bar .grupo { display: flex; gap: 8px; align-items: flex-end; }
   .ent-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; margin-bottom: 4px; }
   .ent-head h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .lugar { font-weight: 600; font-size: 14px; white-space: nowrap; }
+  .lugar.misto { color: var(--warn-ink); }
+  .lugar.falta { color: var(--warn-ink); font-weight: 500; }
+  .sit { font-size: 13px; font-weight: 600; border-radius: 3px; padding: 2px 8px; }
+  .sit.aberto { background: var(--ok-bg); color: var(--ok-ink); }
+  .sit.fechado { background: var(--group); color: var(--muted); }
   .ent-resumo { color: var(--muted); font-size: 14px; margin: 0 0 14px; font-variant-numeric: tabular-nums; }
   .ent-resumo strong { color: var(--ink); font-weight: 600; }
   .ent-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
@@ -466,7 +472,7 @@
   }
   function showLogin(msg) {
     isEditor = false;
-    if (typeof ent !== "undefined") { ent.lista = []; ent.linhas = []; ent.ativa = null; ent.escolhas = null; entMap = {}; }
+    if (typeof ent !== "undefined") { ent.lista = []; ent.linhas = []; ent.ativa = null; ent.aberta = null; ent.escolhas = null; ent.confirm = null; entMap = {}; }
     if ($("viewEntregas")) { $("viewEntregas").hidden = true; $("viewNotas").hidden = false; $("tabNotas").setAttribute("aria-selected", "true"); $("tabEntregas").setAttribute("aria-selected", "false"); }
     view = { notas: [], total: 0, cadastradas: 0, itens: 0 };
     show("login");
@@ -863,7 +869,7 @@
     return out;
   }
   async function todosCarrinhos() {
-    return { entregas: await paginado("entregas", "data", "data"), linhas: await paginado("entrega_notas", "entrega, nota_id, loja_chave, loja_nome", "id") };
+    return { entregas: await paginado("entregas", "data, aberto", "data"), linhas: await paginado("entrega_notas", "entrega, nota_id, loja_chave, loja_nome", "id") };
   }
   async function restaurarCarrinhos(entregas, linhas) {
     var r = await sb.from("entregas").upsert(entregas.map(function (e) { return { data: e.data }; }), { onConflict: "data", ignoreDuplicates: true });
@@ -917,7 +923,9 @@
   });
 
   // ======================= CARRINHOS DE ENTREGA =======================
-  var ent = { lista: [], ativa: null, linhas: [], confirmDel: false, escolhas: null, carregando: false };
+  // ent.aberta = o único carrinho aberto no sistema (gravado no banco)
+  // ent.ativa  = o carrinho que está sendo visto na aba Carrinhos de entrega
+  var ent = { lista: [], aberta: null, ativa: null, linhas: [], confirm: null, escolhas: null, carregando: false };
   var entMap = {};
   var empresasLista = [];
   var DIAS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
@@ -929,8 +937,16 @@
   function volNum(v) { return v === null || v === undefined || v === "" ? null : Number(v); }
   function entSay(kind, text) { var d = document.createElement("div"); d.className = "msg " + kind; d.textContent = text; $("entMsgs").appendChild(d); }
   function entClear() { $("entMsgs").textContent = ""; }
-  function lembrarAtiva(d) { try { if (d) localStorage.setItem("entregaAtiva", d); else localStorage.removeItem("entregaAtiva"); } catch (e) {} }
-  function ativaGuardada() { try { return localStorage.getItem("entregaAtiva"); } catch (e) { return null; } }
+  // local da nota a partir dos itens: "DOCA 2", "CD / DOCA 1", "CD + 2 itens sem local", "Não classificado"
+  function localNota(l) {
+    var ls = l.locais || [], com = ls.filter(function (x) { return x.local; }), sem = 0;
+    ls.forEach(function (x) { if (!x.local) sem += Number(x.itens) || 0; });
+    if (!com.length) return { texto: "Não classificado", falta: true };
+    var t = com.map(function (x) { return x.local; }).join(" / ");
+    if (sem) t += " + " + plural(sem, "item sem local", "itens sem local");
+    return { texto: t, falta: sem > 0, misto: com.length > 1 };
+  }
+  function vendoAberto() { return !!ent.ativa && ent.ativa === ent.aberta; }
 
   // ---------- abas ----------
   function abrirAba(qual) {
@@ -939,8 +955,12 @@
     $("viewEntregas").hidden = notas;
     $("tabNotas").setAttribute("aria-selected", notas ? "true" : "false");
     $("tabEntregas").setAttribute("aria-selected", notas ? "false" : "true");
-    if (!notas) { if (ent.ativa) abrirEntrega(ent.ativa); else renderEntrega(); }
-    else render();
+    if (!notas) {
+      carregarEntregas(ent.ativa || ent.aberta).then(function () { if (ent.ativa) abrirEntrega(ent.ativa); else renderEntrega(); });
+    } else {
+      carregarEntregas().then(function () { atualizarEntMap(); });
+      render();
+    }
   }
   $("tabNotas").addEventListener("click", function () { abrirAba("notas"); });
   $("tabEntregas").addEventListener("click", function () { abrirAba("entregas"); });
@@ -950,55 +970,61 @@
     var r = await sb.rpc("listar_entregas");
     if (r.error) { failed(r.error, "Não consegui carregar os carrinhos de entrega."); return; }
     ent.lista = Array.isArray(r.data) ? r.data : [];
-    var hoje = isoDate(new Date());
-    var escolha = selecionar || ent.ativa || ativaGuardada();
-    if (!ent.lista.some(function (e) { return e.data === escolha; })) {
-      var futuras = ent.lista.filter(function (e) { return e.data >= hoje; });
-      escolha = futuras.length ? futuras[futuras.length - 1].data : (ent.lista[0] ? ent.lista[0].data : null);
-    }
+    var ab = ent.lista.filter(function (e) { return e.aberto; })[0];
+    ent.aberta = ab ? ab.data : null;
+    var escolha = selecionar || ent.ativa || ent.aberta;
+    if (!ent.lista.some(function (e) { return e.data === escolha; })) escolha = ent.aberta || (ent.lista[0] ? ent.lista[0].data : null);
     ent.ativa = escolha;
-    lembrarAtiva(escolha);
     var sel = $("entSel");
     if (!ent.lista.length) sel.innerHTML = '<option value="">Nenhum carrinho criado</option>';
     else sel.innerHTML = ent.lista.map(function (e) {
       return '<option value="' + esc(e.data) + '"' + (e.data === escolha ? " selected" : "") + ">" +
-        esc(fmtLonga(e.data)) + " (" + esc(plural(e.notas, "nota", "notas")) + ")" + (e.data < hoje ? ", já passou" : "") + "</option>";
+        (e.aberto ? "● Aberto: " : "Fechado: ") + esc(fmtLonga(e.data)) + " (" + esc(plural(e.notas, "nota", "notas")) + ")</option>";
     }).join("");
-    $("tabEntCount").textContent = ent.lista.length ? String(ent.lista.length) : "";
+    $("tabEntCount").textContent = ent.aberta ? "aberto " + fmtCurta(ent.aberta) : (ent.lista.length ? String(ent.lista.length) : "");
     renderAtivaBar();
   }
   function resumoDaLista(d) { for (var i = 0; i < ent.lista.length; i++) if (ent.lista[i].data === d) return ent.lista[i]; return null; }
 
   async function abrirEntrega(d) {
-    ent.ativa = d; ent.confirmDel = false;
-    lembrarAtiva(d);
-    if (!d) { ent.linhas = []; renderEntrega(); renderAtivaBar(); return; }
+    ent.ativa = d; ent.confirm = null;
+    if (!d) { ent.linhas = []; renderEntrega(); return; }
     ent.carregando = true; renderEntrega();
     var r = await sb.rpc("entrega_detalhe", { p_data: d });
     ent.carregando = false;
     if (r.error) { failed(r.error, "Não consegui abrir o carrinho."); return; }
     ent.linhas = (r.data && r.data.linhas) || [];
     renderEntrega();
-    renderAtivaBar();
   }
-  $("entSel").addEventListener("change", function () { ent.escolhas = null; entClear(); abrirEntrega($("entSel").value || null); render(); });
+  $("entSel").addEventListener("change", function () { ent.escolhas = null; entClear(); abrirEntrega($("entSel").value || null); });
+
+  async function abrirCarrinho(d, criarNovo) {
+    var r = await sb.rpc("abrir_entrega", { p_data: d });
+    if (r.error) { failed(r.error, "Não consegui abrir o carrinho."); return false; }
+    var res = r.data || {};
+    entClear();
+    entSay("ok", (res.criado ? "Carrinho da entrega de " + fmtDate(d) + " criado e aberto." : "Carrinho da entrega de " + fmtDate(d) + " aberto.") +
+      " As notas adicionadas na aba Notas vão para ele.");
+    if (res.fechado) entSay("warn", "O carrinho de " + fmtDate(res.fechado) + " foi fechado. Ele continua salvo e pode ser exportado ou reaberto.");
+    await carregarEntregas(d);
+    await abrirEntrega(d);
+    return true;
+  }
 
   $("entCriar").addEventListener("click", async function () {
     if (!isEditor) return;
     var d = $("entNova").value;
     entClear();
     if (!d) { entSay("err", "Escolha a data de entrega antes de criar o carrinho."); return; }
-    if (resumoDaLista(d)) { entSay("warn", "Já existe um carrinho para " + fmtDate(d) + ". Ele foi aberto."); }
-    else {
-      var r = await sb.from("entregas").insert({ data: d });
-      if (r.error && !/duplicate/i.test(r.error.message || "")) { failed(r.error, "Não consegui criar o carrinho."); return; }
-      entSay("ok", "Carrinho da entrega de " + fmtDate(d) + " criado. Agora adicione as notas.");
+    if (ent.aberta && ent.aberta !== d && ent.confirm !== "criar:" + d) {
+      ent.confirm = "criar:" + d;
+      entSay("warn", "Já existe um carrinho aberto (entrega de " + fmtDate(ent.aberta) + "). Ao criar o de " + fmtDate(d) + ", o de " + fmtDate(ent.aberta) + " será fechado. Clique em “Criar carrinho” de novo para confirmar.");
+      return;
     }
-    $("entNova").value = "";
-    await carregarEntregas(d);
-    abrirEntrega(d);
-    render();
+    ent.confirm = null;
+    if (await abrirCarrinho(d, true)) $("entNova").value = "";
   });
+  $("entNova").addEventListener("change", function () { if (ent.confirm && ent.confirm.indexOf("criar:") === 0) { ent.confirm = null; entClear(); } });
 
   // ---------- agrupamento por loja ----------
   function gruposPorLoja(linhas) {
@@ -1026,31 +1052,48 @@
     var box = $("entConteudo");
     if (!ent.ativa) {
       box.innerHTML = '<div class="empty">' + (isEditor
-        ? "Nenhum carrinho ainda. Escolha a data de entrega acima e clique em “Criar carrinho”."
+        ? "Nenhum carrinho ainda. Escolha a data de entrega acima e clique em “Criar carrinho”. Ele já nasce aberto."
         : "Nenhum carrinho de entrega foi criado ainda.") + "</div>";
       return;
     }
     if (ent.carregando) { box.innerHTML = '<div class="empty">Abrindo o carrinho…</div>'; return; }
+    var aberto = vendoAberto(), edita = isEditor && aberto;
     var t = totais(ent.linhas), grupos = gruposPorLoja(ent.linhas), h = "";
-    h += '<div class="ent-head"><h2>Entrega de ' + esc(fmtLonga(ent.ativa)) + "</h2></div>";
+    h += '<div class="ent-head"><h2>Entrega de ' + esc(fmtLonga(ent.ativa)) + "</h2>" +
+      (aberto ? '<span class="sit aberto">Aberto</span>' : '<span class="sit fechado">Fechado</span>') + "</div>";
     h += '<p class="ent-resumo"><strong>' + esc(plural(t.notas, "nota", "notas")) + "</strong>, <strong>" + esc(plural(t.volumes, "volume", "volumes")) +
       "</strong>, " + esc(plural(t.nLojas, "loja", "lojas")) + (t.semVol ? ". " + esc(plural(t.semVol, "nota sem volume informado", "notas sem volume informado")) : "") + "</p>";
+    var semLocal = ent.linhas.filter(function (l) { return localNota(l).falta; }).length;
+    if (semLocal) h += '<p class="msg warn" style="margin:0 0 14px">' + esc(plural(semLocal, "nota tem", "notas têm")) + " itens sem local classificado. Classifique na aba Notas (campo Local de cada item) para saber onde a mercadoria está.</p>";
+    if (!aberto) {
+      h += '<p class="ent-resumo">' + (ent.aberta
+        ? "Este carrinho está fechado. O carrinho aberto agora é o da entrega de " + esc(fmtDate(ent.aberta)) + "."
+        : "Este carrinho está fechado. Nenhum carrinho está aberto no momento.") + "</p>";
+    }
     h += '<div class="ent-acoes">' +
       '<button class="primary" data-xls="__geral"' + (t.notas ? "" : " disabled") + '>Baixar pedido geral (Excel)</button>' +
-      '<button data-pdf="__geral"' + (t.notas ? "" : " disabled") + '>Baixar pedido geral (PDF)</button>' +
-      (isEditor ? (ent.confirmDel
-        ? '<span class="spacer"></span><button class="danger" id="entDelOk">Confirmar: excluir o carrinho de ' + esc(fmtDate(ent.ativa)) + '</button><button id="entDelNo">Cancelar</button>'
-        : '<span class="spacer"></span><button class="danger" id="entDel">Excluir carrinho</button>') : "") +
-      "</div>";
+      '<button data-pdf="__geral"' + (t.notas ? "" : " disabled") + '>Baixar pedido geral (PDF)</button>';
     if (isEditor) {
+      h += '<span class="spacer"></span>';
+      if (ent.confirm === "reabrir") {
+        h += '<button class="primary" id="entReabrirOk">Confirmar: reabrir e fechar o de ' + esc(fmtDate(ent.aberta)) + '</button><button id="entCancel">Cancelar</button>';
+      } else if (ent.confirm === "excluir") {
+        h += '<button class="danger" id="entDelOk">Confirmar: excluir o carrinho de ' + esc(fmtDate(ent.ativa)) + '</button><button id="entCancel">Cancelar</button>';
+      } else {
+        h += aberto ? '<button id="entFechar">Fechar carrinho</button>' : '<button id="entReabrir">Reabrir carrinho</button>';
+        h += '<button class="danger" id="entDel">Excluir carrinho</button>';
+      }
+    }
+    h += "</div>";
+    if (edita) {
       h += '<div class="ent-add"><label for="entNum">Adicionar notas a este carrinho</label>' +
         '<div class="linha"><input id="entNum" autocomplete="off" inputmode="text" placeholder="Número da NF ou da remessa, pode colar vários">' +
         '<button class="primary" id="entAddBtn">Adicionar</button></div>' +
-        '<p class="dica">Separe vários números com espaço, vírgula ou quebra de linha. A nota entra no carrinho da loja de destino, e dá para trocar a loja depois. Também dá para adicionar pela aba Notas.</p></div>';
+        '<p class="dica">Separe vários números com espaço, vírgula ou quebra de linha. A nota entra no carrinho da loja de destino, e dá para trocar a loja depois. Pela aba Notas, o botão “Adicionar ao carrinho” também manda para este carrinho.</p></div>';
       if (ent.escolhas) h += renderEscolhas();
     }
     if (!grupos.length) {
-      h += '<div class="empty">' + (isEditor ? "Este carrinho ainda está vazio. Digite os números das notas acima." : "Este carrinho ainda está vazio.") + "</div>";
+      h += '<div class="empty">' + (edita ? "Este carrinho ainda está vazio. Adicione as notas pela aba Notas ou digitando os números acima." : "Este carrinho está vazio.") + "</div>";
       box.innerHTML = h; return;
     }
     grupos.forEach(function (g) {
@@ -1058,15 +1101,16 @@
         (g.cnpj ? '<span class="meta">' + esc(fmtCnpj(g.cnpj)) + "</span>" : "") +
         '<span class="spacer"></span><span class="tot">' + esc(plural(g.linhas.length, "nota", "notas")) + ", " + esc(plural(g.volumes, "volume", "volumes")) + "</span>" +
         ' <button data-xls="' + esc(g.chave) + '">Excel</button> <button data-pdf="' + esc(g.chave) + '">PDF</button></div>' +
-        '<div class="scroller"><table><thead><tr><th>NF</th><th>Remessa</th><th class="num">Volumes</th><th>Emissão</th><th>Fornecedor</th>' +
-        (isEditor ? "<th>Carrinho da loja</th><th></th>" : "") + "</tr></thead><tbody>";
+        '<div class="scroller"><table><thead><tr><th>NF</th><th>Remessa</th><th class="num">Volumes</th><th>Local</th><th>Emissão</th><th>Fornecedor</th>' +
+        (edita ? "<th>Carrinho da loja</th><th></th>" : "") + "</tr></thead><tbody>";
       g.linhas.forEach(function (l) {
         var v = volNum(l.volumes);
         h += "<tr><td><strong>" + esc(l.numero) + "</strong>" + (l.serie ? ' <span class="vazio-cor">série ' + esc(l.serie) + "</span>" : "") + "</td>" +
           "<td>" + (l.remessa ? esc(l.remessa) : '<span class="vazio-cor">—</span>') + "</td>" +
           '<td class="num">' + (v === null ? '<span class="vazio-cor">não informado</span>' : esc(fmt(v))) + "</td>" +
+          (function () { var lc = localNota(l); return '<td><span class="lugar' + (lc.falta ? " falta" : "") + (lc.misto ? " misto" : "") + '">' + esc(lc.texto) + "</span></td>"; })() +
           "<td>" + esc(fmtDate(l.emissao)) + "</td><td>" + esc(l.emitente || "") + "</td>" +
-          (isEditor ? '<td><select class="troca" data-linha="' + esc(l.id) + '" aria-label="Mudar a nota ' + esc(l.numero) + ' de loja">' + opcoesLoja(l.loja_chave, l.loja_nome) + "</select></td>" +
+          (edita ? '<td><select class="troca" data-linha="' + esc(l.id) + '" aria-label="Mudar a nota ' + esc(l.numero) + ' de loja">' + opcoesLoja(l.loja_chave, l.loja_nome) + "</select></td>" +
             '<td><button class="danger" data-tirar="' + esc(l.id) + '">Tirar</button></td>' : "") + "</tr>";
       });
       h += "</tbody></table></div></section>";
@@ -1098,11 +1142,15 @@
     return h;
   }
 
-  // ---------- adicionar / tirar ----------
+  // ---------- adicionar / tirar (sempre no carrinho aberto) ----------
   async function adicionarIds(ids) {
     if (!ids.length) return null;
-    var r = await sb.rpc("adicionar_na_entrega", { p_data: ent.ativa, p_notas: ids });
-    if (r.error) { failed(r.error, "Não consegui adicionar ao carrinho."); return null; }
+    if (!ent.aberta) { failed(null, "Nenhum carrinho está aberto."); return null; }
+    var r = await sb.rpc("adicionar_na_entrega", { p_data: ent.aberta, p_notas: ids });
+    if (r.error) {
+      if (/não está aberto/i.test(r.error.message || "")) { await carregarEntregas(); say("err", "Esse carrinho foi fechado por outra pessoa. Confira qual carrinho está aberto agora."); return null; }
+      failed(r.error, "Não consegui adicionar ao carrinho."); return null;
+    }
     return r.data || {};
   }
   async function adicionarPorNumero() {
@@ -1127,12 +1175,12 @@
       if (!fora.length) { jaAqui.push(t); return; }
       if (fora.length === 1) {
         diretas.push(fora[0].id);
-        var em = (fora[0].entregas || []).filter(function (d) { return d !== ent.ativa; });
+        var em = (fora[0].entregas || []).filter(function (d) { return d !== ent.aberta; });
         if (em.length) outras.push("NF " + fora[0].numero + " (também na entrega de " + em.map(fmtDate).join(", ") + ")");
       } else escolhas.push({ termo: t, notas: fora });
     });
     var res = await adicionarIds(diretas.filter(function (x, i) { return diretas.indexOf(x) === i; }));
-    if (res && res.adicionadas) entSay("ok", plural(res.adicionadas, "nota adicionada", "notas adicionadas") + " ao carrinho de " + fmtDate(ent.ativa) + ".");
+    if (res && res.adicionadas) entSay("ok", plural(res.adicionadas, "nota adicionada", "notas adicionadas") + " ao carrinho de " + fmtDate(ent.aberta) + ".");
     if (jaAqui.length) entSay("warn", "Já estavam neste carrinho: " + jaAqui.join(", ") + ".");
     if (outras.length) entSay("warn", "Atenção, nota em mais de uma entrega: " + outras.join("; ") + ".");
     if (naoAchou.length) entSay("err", "Não encontrei nota nem remessa com: " + naoAchou.join(", ") + ". Confira o número ou se o XML já foi importado.");
@@ -1152,23 +1200,35 @@
     var x = t.getAttribute("data-xls"); if (x) { exportarEntrega("xlsx", x); return; }
     var p = t.getAttribute("data-pdf"); if (p) { exportarEntrega("pdf", p); return; }
     if (!isEditor) return;
-    if (t.id === "entDel") { ent.confirmDel = true; renderEntrega(); return; }
-    if (t.id === "entDelNo") { ent.confirmDel = false; renderEntrega(); return; }
+    var d = ent.ativa;
+    if (t.id === "entCancel") { ent.confirm = null; renderEntrega(); return; }
+    if (t.id === "entDel") { ent.confirm = "excluir"; renderEntrega(); return; }
+    if (t.id === "entFechar") {
+      var rf = await sb.rpc("fechar_entrega", { p_data: d });
+      if (rf.error) { failed(rf.error, "Não consegui fechar o carrinho."); return; }
+      entClear(); entSay("ok", "Carrinho de " + fmtDate(d) + " fechado. Para montar outra entrega, crie um carrinho novo ou reabra um existente.");
+      await carregarEntregas(d); await abrirEntrega(d); return;
+    }
+    if (t.id === "entReabrir") {
+      if (ent.aberta && ent.aberta !== d) { ent.confirm = "reabrir"; renderEntrega(); return; }
+      await abrirCarrinho(d, false); return;
+    }
+    if (t.id === "entReabrirOk") { ent.confirm = null; await abrirCarrinho(d, false); return; }
     if (t.id === "entDelOk") {
-      var d = ent.ativa;
       var r = await sb.from("entregas").delete().eq("data", d);
       if (r.error) { failed(r.error, "Não consegui excluir o carrinho."); return; }
       entClear(); entSay("ok", "Carrinho de " + fmtDate(d) + " excluído. As notas continuam cadastradas.");
-      ent.ativa = null; lembrarAtiva(null);
+      ent.ativa = null;
       await carregarEntregas(); await abrirEntrega(ent.ativa); atualizarEntMap(); return;
     }
+    if (!vendoAberto()) return;
     if (t.id === "escNo") { ent.escolhas = null; renderEntrega(); return; }
     if (t.id === "escOk") {
       var ids = Array.prototype.map.call(document.querySelectorAll("input[data-escolha]:checked"), function (c) { return c.getAttribute("data-escolha"); });
       ent.escolhas = null;
       var res = await adicionarIds(ids);
       entClear();
-      if (res && res.adicionadas) entSay("ok", plural(res.adicionadas, "nota adicionada", "notas adicionadas") + " ao carrinho de " + fmtDate(ent.ativa) + ".");
+      if (res && res.adicionadas) entSay("ok", plural(res.adicionadas, "nota adicionada", "notas adicionadas") + " ao carrinho de " + fmtDate(ent.aberta) + ".");
       await carregarEntregas(ent.ativa); await abrirEntrega(ent.ativa); return;
     }
     var tirar = t.getAttribute("data-tirar");
@@ -1180,7 +1240,7 @@
   });
   $("viewEntregas").addEventListener("change", async function (e) {
     var t = e.target;
-    if (!isEditor || !t.classList || !t.classList.contains("troca")) return;
+    if (!isEditor || !vendoAberto() || !t.classList || !t.classList.contains("troca")) return;
     var chave = t.value, nome = t.options[t.selectedIndex].textContent;
     var r = await sb.from("entrega_notas").update({ loja_chave: chave, loja_nome: nome }).eq("id", t.getAttribute("data-linha"));
     if (r.error) { failed(r.error, "Não consegui mudar a loja."); return; }
@@ -1198,44 +1258,47 @@
     var bar = $("entAtivaBar");
     if (!isEditor) { bar.hidden = true; return; }
     bar.hidden = false;
-    if (!ent.ativa) {
-      bar.innerHTML = '<span class="vazio-cor">Para montar um carrinho de entrega, crie a data na aba “Carrinhos de entrega”.</span> <button class="linkish" data-irent="1">Abrir carrinhos</button>';
+    if (!ent.aberta) {
+      bar.innerHTML = '<span class="vazio-cor">Nenhum carrinho aberto. Crie ou reabra um carrinho na aba “Carrinhos de entrega” para adicionar notas.</span> <button class="linkish" data-irent="1">Abrir carrinhos</button>';
       return;
     }
-    var r = resumoDaLista(ent.ativa);
-    bar.innerHTML = "<span>Montando o carrinho da entrega de <strong>" + esc(fmtLonga(ent.ativa)) + "</strong>" +
-      (r ? " (" + esc(plural(r.notas, "nota", "notas")) + ", " + esc(plural(r.volumes, "volume", "volumes")) + ")" : "") + ".</span>" +
+    var r = resumoDaLista(ent.aberta);
+    bar.innerHTML = "<span>Carrinho aberto: entrega de <strong>" + esc(fmtLonga(ent.aberta)) + "</strong>" +
+      (r ? " (" + esc(plural(r.notas, "nota", "notas")) + ", " + esc(plural(r.volumes, "volume", "volumes")) + ")" : "") +
+      ". O botão “Adicionar ao carrinho” manda a nota para ele.</span>" +
       ' <button class="linkish" data-irent="1">Ver carrinho</button>';
   }
-  $("entAtivaBar").addEventListener("click", function (e) { if (e.target.getAttribute && e.target.getAttribute("data-irent")) abrirAba("entregas"); });
+  $("entAtivaBar").addEventListener("click", function (e) {
+    if (e.target.getAttribute && e.target.getAttribute("data-irent")) { ent.ativa = ent.aberta || ent.ativa; abrirAba("entregas"); }
+  });
 
   function htmlEntregaDaNota(n) {
     var ds = entMap[n.id] || [];
     var h = ds.length ? ' <span class="ent-badge">Entrega ' + ds.map(function (d) { return esc(fmtCurta(d)); }).join(", ") + "</span>" : "";
-    if (isEditor && ent.ativa) {
-      h += ds.indexOf(ent.ativa) >= 0
-        ? ' <button data-entdel="' + esc(n.id) + '">Tirar da entrega ' + esc(fmtCurta(ent.ativa)) + "</button>"
-        : ' <button class="add-ent" data-entadd="' + esc(n.id) + '">Adicionar à entrega ' + esc(fmtCurta(ent.ativa)) + "</button>";
+    if (isEditor && ent.aberta) {
+      h += ds.indexOf(ent.aberta) >= 0
+        ? ' <button data-entdel="' + esc(n.id) + '">Tirar do carrinho</button>'
+        : ' <button class="add-ent" data-entadd="' + esc(n.id) + '">Adicionar ao carrinho</button>';
     }
     return h;
   }
   async function cliqueEntregaNaNota(t) {
     var add = t.getAttribute("data-entadd"), del = t.getAttribute("data-entdel");
     if (!add && !del) return false;
-    if (!isEditor || !ent.ativa) return true;
+    if (!isEditor || !ent.aberta) return true;
     t.disabled = true;
     clearMsgs();
     if (add) {
       var res = await adicionarIds([add]);
       if (res) {
-        var outras = (entMap[add] || []).filter(function (d) { return d !== ent.ativa; });
+        var outras = (entMap[add] || []).filter(function (d) { return d !== ent.aberta; });
         if (outras.length) say("warn", "Esta nota também está na entrega de " + outras.map(fmtDate).join(", ") + ".");
       }
     } else {
-      var r = await sb.from("entrega_notas").delete().eq("entrega", ent.ativa).eq("nota_id", del);
+      var r = await sb.from("entrega_notas").delete().eq("entrega", ent.aberta).eq("nota_id", del);
       if (r.error) failed(r.error, "Não consegui tirar a nota do carrinho.");
     }
-    await carregarEntregas(ent.ativa);
+    await carregarEntregas();
     await atualizarEntMap();
     return true;
   }
@@ -1285,11 +1348,11 @@
   }
   function gerarExcel(grupos, chaveLoja) {
     var XLSX = window.XLSX, wb = XLSX.utils.book_new(), t = totais([].concat.apply([], grupos.map(function (g) { return g.linhas; })));
-    var cab = ["Loja", "CNPJ da loja", "NF", "Remessa", "Volumes"];
-    function linhaNota(g, l) { return [g.nome, g.cnpj ? fmtCnpj(g.cnpj) : "", l.numero, l.remessa || "", volNum(l.volumes)]; }
+    var cab = ["Loja", "CNPJ da loja", "NF", "Remessa", "Volumes", "Local"];
+    function linhaNota(g, l) { return [g.nome, g.cnpj ? fmtCnpj(g.cnpj) : "", l.numero, l.remessa || "", volNum(l.volumes), localNota(l).texto]; }
     function folha(rows) {
       var ws = XLSX.utils.aoa_to_sheet(rows);
-      ws["!cols"] = [{ wch: 38 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 10 }];
+      ws["!cols"] = [{ wch: 38 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 26 }];
       return ws;
     }
     var geral = [[titulo(chaveLoja, grupos)], ["Gerado em " + new Date().toLocaleString("pt-BR")], [], cab];
@@ -1334,14 +1397,14 @@
     grupos.forEach(function (g) {
       doc.autoTable({
         startY: y + 6, margin: { left: M, right: M },
-        head: [[{ content: g.nome + (g.cnpj ? "   CNPJ " + fmtCnpj(g.cnpj) : ""), colSpan: 4, styles: { halign: "left", fillColor: verde, textColor: 255, fontStyle: "bold" } }],
-               ["Loja", "NF", "Remessa", "Volumes"]],
-        body: g.linhas.map(function (l) { var v = volNum(l.volumes); return [g.nome, l.numero + (l.serie ? " / " + l.serie : ""), l.remessa || "-", v === null ? "-" : fmt(v)]; }),
-        foot: [["Total da loja", plural(g.linhas.length, "nota", "notas"), "", fmt(g.volumes)]],
+        head: [[{ content: g.nome + (g.cnpj ? "   CNPJ " + fmtCnpj(g.cnpj) : ""), colSpan: 5, styles: { halign: "left", fillColor: verde, textColor: 255, fontStyle: "bold" } }],
+               ["Loja", "NF", "Remessa", "Volumes", "Local"]],
+        body: g.linhas.map(function (l) { var v = volNum(l.volumes); return [g.nome, l.numero + (l.serie ? " / " + l.serie : ""), l.remessa || "-", v === null ? "-" : fmt(v), localNota(l).texto]; }),
+        foot: [["Total da loja", plural(g.linhas.length, "nota", "notas"), "", fmt(g.volumes), ""]],
         styles: { font: "helvetica", fontSize: 9.5, cellPadding: 2, lineColor: [213, 219, 225], lineWidth: 0.1 },
         headStyles: { fillColor: [231, 237, 241], textColor: 24, fontStyle: "bold" },
         footStyles: { fillColor: [242, 244, 246], textColor: 24, fontStyle: "bold" },
-        columnStyles: { 0: { cellWidth: 70 }, 3: { halign: "right" } },
+        columnStyles: { 0: { cellWidth: 58 }, 1: { cellWidth: 26 }, 2: { cellWidth: 26 }, 3: { halign: "right", cellWidth: 20 }, 4: { fontStyle: "bold" } },
         showHead: "everyPage", rowPageBreak: "avoid",
         didParseCell: function (d) { if (d.column.index === 3 && (d.section === "foot" || (d.section === "head" && d.row.index === 1))) d.cell.styles.halign = "right"; }
       });
