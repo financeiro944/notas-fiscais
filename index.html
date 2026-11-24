@@ -157,6 +157,8 @@
   .ent-bar .grupo { display: flex; gap: 8px; align-items: flex-end; }
   .ent-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; margin-bottom: 4px; }
   .ent-head h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .destino { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; }
+  .destino select { font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
   .lugar { font-weight: 600; font-size: 14px; white-space: nowrap; }
   .lugar.misto { color: var(--warn-ink); }
   .lugar.falta { color: var(--warn-ink); font-weight: 500; }
@@ -563,7 +565,8 @@
     if (my !== reqId) return;
     if (r.error) { $("status").textContent = ""; failed(r.error, "Não consegui pesquisar."); return; }
     var d = r.data || {};
-    view = { notas: d.notas || [], total: d.total || 0, cadastradas: d.cadastradas || 0, itens: d.itens_cadastrados || 0 };
+    view = { notas: d.notas || [], total: d.total || 0, cadastradas: d.cadastradas || 0, itens: d.itens_cadastrados || 0,
+             volCadastrados: d.volumes_cadastrados, volTotal: d.volumes_total };
     render();
     atualizarEntMap();
   }
@@ -584,9 +587,11 @@
     var terms = queryTerms();
     var s;
     if (filtrosAtivos()) {
-      s = "<strong>" + fmt(view.total) + "</strong> nota" + (view.total === 1 ? "" : "s") + " encontrada" + (view.total === 1 ? "" : "s") + " de <strong>" + fmt(view.cadastradas) + "</strong> cadastradas";
+      s = "<strong>" + fmt(view.total) + "</strong> nota" + (view.total === 1 ? "" : "s") + " encontrada" + (view.total === 1 ? "" : "s") + " de <strong>" + fmt(view.cadastradas) + "</strong> cadastradas" +
+        (view.volTotal != null ? ", <strong>" + fmt(view.volTotal) + "</strong> volume" + (Number(view.volTotal) === 1 ? "" : "s") : "");
     } else {
-      s = "<strong>" + fmt(view.cadastradas) + "</strong> notas cadastradas, <strong>" + fmt(view.itens) + "</strong> itens";
+      s = "<strong>" + fmt(view.cadastradas) + "</strong> notas cadastradas, <strong>" + fmt(view.itens) + "</strong> itens" +
+        (view.volCadastrados != null ? ", <strong>" + fmt(view.volCadastrados) + "</strong> volumes" : "");
     }
     $("status").innerHTML = s + '<span class="spacer"></span>' + (view.total ? '<button id="export">Exportar resultado (CSV)</button>' : "");
 
@@ -680,6 +685,10 @@
       confirmDel = null;
       var r = await sb.from("notas").delete().eq("id", del);
       if (r.error) { failed(r.error, "Não consegui excluir a nota."); render(); return; }
+      var vDel = 0;
+      view.notas.forEach(function (n) { if (n.id === del) vDel = Number(n.volumes) || 0; });
+      if (view.volTotal != null) view.volTotal = Math.max(0, view.volTotal - vDel);
+      if (view.volCadastrados != null) view.volCadastrados = Math.max(0, view.volCadastrados - vDel);
       view.notas = view.notas.filter(function (n) { return n.id !== del; });
       view.total = Math.max(0, view.total - 1);
       view.cadastradas = Math.max(0, view.cadastradas - 1);
@@ -946,6 +955,10 @@
     if (sem) t += " + " + plural(sem, "item sem local", "itens sem local");
     return { texto: t, falta: sem > 0, misto: com.length > 1 };
   }
+  var DESTINOS = ["DOCA 1", "DOCA 2", "DOCA 3", "LOJA", "CD"];
+  function opcoesDestino(primeira) {
+    return '<option value="">' + esc(primeira) + "</option>" + DESTINOS.map(function (d) { return '<option value="' + d + '">' + d + "</option>"; }).join("");
+  }
   function vendoAberto() { return !!ent.ativa && ent.ativa === ent.aberta; }
 
   // ---------- abas ----------
@@ -1076,15 +1089,15 @@
     if (isEditor) {
       h += '<span class="spacer"></span>';
       if (ent.confirm === "cd") {
-        var foraCD = ent.linhas.filter(function (l) { return localNota(l).texto !== "CD"; }).length;
-        h += '<button class="primary" id="entCDOk">Confirmar: marcar as ' + esc(fmt(t.notas)) + ' notas como CD</button><button id="entCancel">Cancelar</button>';
-        h += '<span class="vazio-cor" style="flex-basis:100%;font-size:13px">Todos os itens das notas deste carrinho passam para o local CD' + (foraCD ? ", inclusive os que hoje estão em outro lugar ou sem local (" + esc(plural(foraCD, "nota", "notas")) + ")" : "") + ".</span>";
+        h += '<label class="destino">Mover as ' + esc(fmt(t.notas)) + ' notas para <select id="entDestino" aria-label="Destino de todas as notas do carrinho">' + opcoesDestino("Escolha…") + "</select></label>" +
+          '<button class="primary" id="entCDOk">Confirmar</button><button id="entCancel">Cancelar</button>';
+        h += '<span class="vazio-cor" style="flex-basis:100%;font-size:13px">Todos os itens das notas deste carrinho passam para o local escolhido, inclusive os que hoje estão em outro lugar ou sem local.</span>';
       } else if (ent.confirm === "reabrir") {
         h += '<button class="primary" id="entReabrirOk">Confirmar: reabrir e fechar o de ' + esc(fmtDate(ent.aberta)) + '</button><button id="entCancel">Cancelar</button>';
       } else if (ent.confirm === "excluir") {
         h += '<button class="danger" id="entDelOk">Confirmar: excluir o carrinho de ' + esc(fmtDate(ent.ativa)) + '</button><button id="entCancel">Cancelar</button>';
       } else {
-        if (t.notas) h += '<button id="entCD">Mover tudo para o CD</button>';
+        if (t.notas) h += '<button id="entCD">Mover tudo para…</button>';
         h += aberto ? '<button id="entFechar">Fechar carrinho</button>' : '<button id="entReabrir">Reabrir carrinho</button>';
         h += '<button class="danger" id="entDel">Excluir carrinho</button>';
       }
@@ -1210,18 +1223,20 @@
     if (t.id === "entDel") { ent.confirm = "excluir"; renderEntrega(); return; }
     if (t.id === "entCD") { ent.confirm = "cd"; renderEntrega(); return; }
     if (t.id === "entCDOk") {
+      var destino = $("entDestino") ? $("entDestino").value : "";
+      if (DESTINOS.indexOf(destino) < 0) { entClear(); entSay("err", "Escolha para onde mover as notas."); return; }
       ent.confirm = null;
       var ids = ent.linhas.map(function (l) { return l.nota_id; }).filter(function (x, i, a) { return a.indexOf(x) === i; });
       t.disabled = true; t.textContent = "Movendo…";
       var ok = 0, erro = null;
       for (var i = 0; i < ids.length; i++) {
-        var rc = await sb.from("itens").update({ local: "CD" }).eq("nota_id", ids[i]);
+        var rc = await sb.from("itens").update({ local: destino }).eq("nota_id", ids[i]);
         if (rc.error) { erro = rc.error; break; }
         ok++;
       }
       entClear();
-      if (erro) failed(erro, "Parei no meio: " + plural(ok, "nota foi marcada", "notas foram marcadas") + " como CD, as outras não.");
-      else entSay("ok", plural(ok, "nota do carrinho foi marcada", "notas do carrinho foram marcadas") + " como CD. A coluna Local, a aba Notas, o Excel e o PDF já mostram o novo local.");
+      if (erro) failed(erro, "Parei no meio: " + plural(ok, "nota foi movida", "notas foram movidas") + " para " + destino + ", as outras não.");
+      else entSay("ok", plural(ok, "nota do carrinho foi movida", "notas do carrinho foram movidas") + " para " + destino + ". A coluna Local, a aba Notas, o Excel e o PDF já mostram o novo local.");
       await abrirEntrega(d); render(); return;
     }
     if (t.id === "entFechar") {
