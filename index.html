@@ -159,6 +159,15 @@
   .ent-head h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
   .destino { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; }
   .destino select { font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
+  .flabel { color: var(--muted); font-size: 14px; }
+  details.multi { position: relative; display: inline-block; }
+  details.multi > summary { list-style: none; cursor: pointer; font: inherit; font-size: 14px; padding: 6px 30px 6px 10px; min-width: 110px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); position: relative; white-space: nowrap; }
+  details.multi > summary::-webkit-details-marker { display: none; }
+  details.multi > summary::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+  details.multi.ativo > summary { border-color: var(--accent); }
+  .multi-pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 180px; padding: 8px 10px; display: grid; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+  .multi-pop label { display: flex; gap: 8px; align-items: center; padding: 4px 2px; font-size: 14px; color: var(--ink); cursor: pointer; }
+  .multi-pop .linkish { justify-self: start; margin-top: 4px; font-size: 13px; }
   .lugar { font-weight: 600; font-size: 14px; white-space: nowrap; }
   .lugar.misto { color: var(--warn-ink); }
   .lugar.falta { color: var(--warn-ink); font-weight: 500; }
@@ -235,7 +244,20 @@
     <label>até <input type="date" id="dto"></label>
     <label>Empresa <select id="femp"><option value="">Todas</option></select></label>
     <label>Tamanho <select id="ftam"><option value="">Todos</option></select></label>
-    <label>Local <select id="floc"><option value="">Todos</option><option value="CD">CD</option><option value="LOJA">LOJA</option><option value="MTD RIO">MTD RIO</option><option value="DOCA 1">DOCA 1</option><option value="DOCA 2">DOCA 2</option><option value="DOCA 3">DOCA 3</option><option value="__none">Sem local</option></select></label>
+    <span class="flabel" id="flocRot">Local</span>
+    <details class="multi" id="flocBox">
+      <summary aria-labelledby="flocRot flocTxt"><span id="flocTxt">Todos</span></summary>
+      <div class="multi-pop" role="group" aria-label="Locais">
+        <label><input type="checkbox" data-loc="CD"> CD</label>
+        <label><input type="checkbox" data-loc="LOJA"> LOJA</label>
+        <label><input type="checkbox" data-loc="MTD RIO"> MTD RIO</label>
+        <label><input type="checkbox" data-loc="DOCA 1"> DOCA 1</label>
+        <label><input type="checkbox" data-loc="DOCA 2"> DOCA 2</label>
+        <label><input type="checkbox" data-loc="DOCA 3"> DOCA 3</label>
+        <label><input type="checkbox" data-loc="__none"> Sem local</label>
+        <button type="button" class="linkish" id="flocTodos">Todos os locais</button>
+      </div>
+    </details>
     <button id="hoje">Hoje</button>
     <button id="semana">Últimos 7 dias</button>
     <button id="mes">Este mês</button>
@@ -544,13 +566,19 @@
 
   // ---------- pesquisa ----------
   function queryTerms() { return tokens($("q").value).split(" ").filter(Boolean); }
-  function filtrosAtivos() { return queryTerms().length > 0 || $("dfrom").value || $("dto").value || $("floc").value || $("femp").value || $("ftam").value; }
+  function locaisSel() { return Array.prototype.map.call(document.querySelectorAll("#flocBox input[data-loc]:checked"), function (c) { return c.getAttribute("data-loc"); }); }
+  function atualizaLocTxt() {
+    var ls = locaisSel().map(function (x) { return x === "__none" ? "Sem local" : x; });
+    $("flocTxt").textContent = !ls.length ? "Todos" : ls.length <= 2 ? ls.join(", ") : ls.length + " locais";
+    $("flocBox").classList.toggle("ativo", ls.length > 0);
+  }
+  function filtrosAtivos() { return queryTerms().length > 0 || $("dfrom").value || $("dto").value || locaisSel().length > 0 || $("femp").value || $("ftam").value; }
   function params(offset, limite) {
     return {
       termos: queryTerms(),
       data_de: $("dfrom").value || null,
       data_ate: $("dto").value || null,
-      local_filtro: $("floc").value || null,
+      local_filtro: locaisSel().length ? locaisSel().join("|") : null,
       empresa_filtro: $("femp").value || null,
       tamanho_filtro: $("ftam").value || null,
       limite: limite,
@@ -654,12 +682,19 @@
   // ---------- filtros ----------
   function agendarBusca() { clearTimeout(timer); timer = setTimeout(buscar, 250); }
   $("q").addEventListener("input", agendarBusca);
-  ["dfrom", "dto", "floc", "femp", "ftam"].forEach(function (id) { $(id).addEventListener("change", buscar); });
+  ["dfrom", "dto", "femp", "ftam"].forEach(function (id) { $(id).addEventListener("change", buscar); });
+  $("flocBox").addEventListener("change", function (e) { if (e.target.getAttribute("data-loc")) { atualizaLocTxt(); buscar(); } });
+  $("flocTodos").addEventListener("click", function () {
+    Array.prototype.forEach.call(document.querySelectorAll("#flocBox input[data-loc]"), function (c) { c.checked = false; });
+    atualizaLocTxt(); $("flocBox").open = false; buscar();
+  });
+  document.addEventListener("click", function (e) { var b = $("flocBox"); if (b.open && !b.contains(e.target)) b.open = false; });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && $("flocBox").open) { $("flocBox").open = false; $("flocBox").querySelector("summary").focus(); } });
   function setRange(a, b) { $("dfrom").value = a; $("dto").value = b; buscar(); }
   $("hoje").addEventListener("click", function () { var t = isoDate(new Date()); setRange(t, t); });
   $("semana").addEventListener("click", function () { var d = new Date(); d.setDate(d.getDate() - 6); setRange(isoDate(d), isoDate(new Date())); });
   $("mes").addEventListener("click", function () { var n = new Date(); setRange(isoDate(new Date(n.getFullYear(), n.getMonth(), 1)), isoDate(new Date(n.getFullYear(), n.getMonth() + 1, 0))); });
-  $("limpaData").addEventListener("click", function () { $("q").value = ""; $("floc").value = ""; $("femp").value = ""; $("ftam").value = ""; setRange("", ""); });
+  $("limpaData").addEventListener("click", function () { $("q").value = ""; Array.prototype.forEach.call(document.querySelectorAll("#flocBox input[data-loc]"), function (c) { c.checked = false; }); atualizaLocTxt(); $("femp").value = ""; $("ftam").value = ""; setRange("", ""); });
 
   $("status").addEventListener("click", function (e) { if (e.target && e.target.id === "export") exportarCsv(); });
 
